@@ -1,4 +1,4 @@
-module github.com/aarondl/upass
+module github.com/aarondl/bpass
 
 go 1.13
 
