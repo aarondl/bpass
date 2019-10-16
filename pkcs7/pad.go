@@ -2,7 +2,16 @@
 // in RFC 5652: Cryptographic Message Syntax (CMS)
 package pkcs7
 
-import "bytes"
+import (
+	"bytes"
+	"errors"
+)
+
+var (
+	errEmptySlice              = errors.New("cannot unpad an empty slice")
+	errPaddingInvalid          = errors.New("pkcs7 unpad failed one of the bytes was incorrect")
+	errPaddingAmountImpossible = errors.New("pkcs7 unpad failed, more padding bytes than is possible was specified")
+)
 
 // From the RFC
 // Some content-encryption algorithms assume the
@@ -47,15 +56,24 @@ func Pad(b []byte, k int) []byte {
 }
 
 // Unpad removes pkcs7 padding
-func Unpad(b []byte) []byte {
+func Unpad(b []byte) ([]byte, error) {
+	if len(b) == 0 {
+		return nil, errEmptySlice
+	}
+
 	padBytes := b[len(b)-1]
-	// We should be able to count backwards, and verify that padBytes
-	// all equal the padBytes integer
-	for i := int(padBytes - 1); i > 0; i-- {
+
+	if int(padBytes) > len(b) {
+		return nil, errPaddingAmountImpossible
+	}
+
+	// Verify that the padding is all == padBytes, else the padding
+	// is invalid.
+	for i := int(padBytes); i > 0; i-- {
 		if b[len(b)-i] != padBytes {
-			panic("failed to pkcs7unpad pkcs7, one of the bytes was incorrect")
+			return nil, errPaddingInvalid
 		}
 	}
 
-	return b[:len(b)-int(padBytes)]
+	return b[:len(b)-int(padBytes)], nil
 }

@@ -5,187 +5,202 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha512"
-	"errors"
 	"fmt"
 	"strconv"
 
-	"github.com/aarondl/upass/pkcs7"
 	"github.com/enceve/crypto/camellia"
 	"github.com/geeksbaek/seed"
+	"github.com/pkg/errors"
 	"golang.org/x/crypto/cast5"
-	"golang.org/x/crypto/scrypt"
 )
 
 // Error returns from decoding
 var (
-	ErrInvalidMagic   = errors.New("invalid magic string")
-	ErrInvalidVersion = errors.New("invalid version")
+	ErrInvalidMagic    = errors.New("invalid magic string")
+	ErrWrongPassphrase = errors.New("incorrect passphrase")
+	ErrInvalidVersion  = errors.New("invalid version")
+	ErrInvalidKey      = errors.New("key size is wrong for the cipher suite")
+	ErrInvalidSalt     = errors.New("salt size is wrong")
 )
 
 const (
-	magicLen   = 16
-	saltLen    = 32
+	magicLen = 16
+	magicStr = "blobpass"
+
 	maxVersion = 99999999
 )
 
-var (
-	magicStr = []byte("blobpass")
-
-	algorithms = map[string]cipherAlg{
-		"AES":      {KeySize: 32, CTOR: aes.NewCipher},
-		"Camellia": {KeySize: 32, CTOR: camellia.NewCipher},
-		"CAST5":    {KeySize: 16, CTOR: func(key []byte) (cipher.Block, error) { return cast5.NewCipher(key) }},
-		"SEED":     {KeySize: 16, CTOR: seed.NewCipher},
-	}
-
-	// cipherSuites are defined in encryption order for their version
-	cipherSuites = map[int][]string{
-		1: {"AES", "Camellia", "CAST5", "SEED"},
-	}
-)
-
-type cipherAlg struct {
-	KeySize int
-	CTOR    func(key []byte) (cipher.Block, error)
+// v0Header is a special case
+var v0Header = []byte{
+	0x6b, 0x6e, 0x69, 0x6f, 0x70, 0x61, 0x73, 0x73,
+	0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x31,
 }
 
-// Encrypt data. The version corresponds to the password derivation function
-// as well as the cipher suite used. Password is automatically salted.
-// The full output of this function is required for decryption as the version
-// numbers, salts and ivs inform the decryption.
-func Encrypt(version int, password, plaintext []byte) (encrypted []byte, err error) {
-	if version > maxVersion {
-		return nil, ErrInvalidVersion
+// config represents a configuration for the encryption/decryption/keygen
+// behavior.
+type config struct {
+	version   int
+	algs      []string
+	saltSize  int
+	keySize   int
+	blockSize int
+
+	// these functions must be set for the config to be able to do anything
+	encrypt encryptFn
+	decrypt decryptFn
+	keygen  keyFn
+}
+
+type cipherAlg struct {
+	KeySize   int
+	BlockSize int
+	CTOR      func(key []byte) (cipher.Block, error)
+}
+
+// These are the functions that each config needs to have. It is not
+// implemented as an interface since it's more of a configuration than a
+// separate type that needs to implement anything specific and different
+// versions/configs can easily borrow implementations from others.
+type (
+	encryptFn func(c config, key, salt, pt []byte) (encrypted []byte, err error)
+	decryptFn func(c config, passphrase, encrypted []byte) (pt, key, salt []byte, err error)
+	keyFn     func(c config, passphrase, salt []byte) (key []byte, err error)
+)
+
+var (
+	algorithms = map[string]cipherAlg{
+		"AES":      {KeySize: 32, BlockSize: aes.BlockSize, CTOR: aes.NewCipher},
+		"Camellia": {KeySize: 32, BlockSize: camellia.BlockSize, CTOR: camellia.NewCipher},
+		"CAST5":    {KeySize: 16, BlockSize: cast5.BlockSize, CTOR: func(key []byte) (cipher.Block, error) { return cast5.NewCipher(key) }},
+		"SEED":     {KeySize: 16, BlockSize: seed.BlockSize, CTOR: seed.NewCipher},
+	}
+	versions = make(map[int]config)
+)
+
+func init() {
+	// Create all the versioned configurations
+	makeVersion(1, encryptV1, decryptV1, deriveKeyV1, 32, "AES", "Camellia", "CAST5")
+}
+
+// makeVersion is a helper for calculating block and key size from the
+// constant list of algorithms and putting the entry in versions
+func makeVersion(version int, e encryptFn, d decryptFn, k keyFn, saltSize int, algs ...string) config {
+	c := config{
+		version:  version,
+		saltSize: saltSize,
+		encrypt:  e,
+		decrypt:  d,
+		keygen:   k,
 	}
 
-	suite, err := cipherSuite(version)
+	for _, a := range algs {
+		alg, ok := algorithms[a]
+		if !ok {
+			panic(fmt.Sprintf("unknown algorithm %s", a))
+		}
+		c.algs = append(c.algs, a)
+		c.keySize += alg.KeySize
+		c.blockSize += alg.BlockSize
+	}
+
+	versions[version] = c
+	return c
+}
+
+// Encrypt data. The version corresponds to which cipher suite is used and
+// therefore what length of key is needed. Which is why it's important to
+// use the same version between DeriveKey and this.
+//
+// It's intended that this method is called with either the same parameters
+// that were returned from Decrypt() (key, salt) to re-use the same key and salt
+// therefore avoid a rekey operation which is costly, or to call DeriveKey
+// to get a new key and salt whether attempting to rekey or simply creating
+// a new encrypted file for which Decrypt() cannot be called.
+//
+// It can be possible that a rekey is needed due to version mismatch issues. In
+// this case ErrInvalidKey/ErrInvalidSalt will signal the need to use DeriveKey
+// to get a new one.
+//
+// In order to avoid data loss it's recommended that DeriveKey is called
+// immediately after Decrypt in case that DeriveKey fails for resource usage
+// reasons instead of after a user has performed edits etc.
+func Encrypt(version int, key, salt, plaintext []byte) (encrypted []byte, err error) {
+	c, err := getVersion(version)
 	if err != nil {
 		return nil, err
 	}
 
-	// Secure random salt for password derivation
-	salt := make([]byte, saltLen)
-	if n, err := rand.Read(salt); n != saltLen || err != nil {
-		return nil, fmt.Errorf("failed to get randomness for salt: %w", err)
-	}
+	return c.encrypt(c, key, salt, plaintext)
+}
 
-	keySize := calcKeySize(suite)
-	key, err := deriveKey(version, password, salt, keySize)
-	if err != nil {
-		return nil, err
-	}
-
-	ciphers, err := makeCiphers(key, suite)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create an iv for all ciphers at once
-	blockSize := calcBlockSize(ciphers)
-	iv := make([]byte, blockSize)
-	if n, err := rand.Read(iv); n != blockSize || err != nil {
-		return nil, fmt.Errorf("failed to get randomness for iv: %w", err)
-	}
-
-	// The output we're constructing in two parts looks like this:
-	// The parens represent encryption, the plaintextHeader has 4 components
-	// while the encrypted part has 2, at the end we join them to create
-	// the full output.
-	// 8:magic|8:version|32:passwordSalt|blockSize:iv|(64:sha512|data)
-	plaintextHeader := make([]byte, magicLen+saltLen+blockSize)
-	copy(plaintextHeader, fmt.Sprintf("%s%08d", magicStr, version))
-	copy(plaintextHeader[magicLen:], salt)
-	copy(plaintextHeader[magicLen+saltLen:], iv)
-
-	sha := sha512.New()
-	_, _ = sha.Write(plaintextHeader)
-	_, _ = sha.Write(plaintext)
-	shaSum := sha.Sum(nil)
-
-	work := make([]byte, sha512.Size+len(plaintext))
-	copy(work, shaSum)
-	copy(work[sha512.Size:], plaintext)
-
-	ivOffset := 0
-	for _, c := range ciphers {
-		cipherBlockSize := c.BlockSize()
-		// Pull out blockSize iv bytes for our cipher
-		cbc := cipher.NewCBCEncrypter(c, iv[ivOffset:ivOffset+cipherBlockSize])
-		ivOffset += cipherBlockSize
-
-		// pad & encrypt
-		work = pkcs7.Pad(work, cipherBlockSize)
-		cbc.CryptBlocks(work, work)
-	}
-
-	return append(plaintextHeader, work...), nil
+// DecryptMeta holds things that are not the plain text, but can be useful
+// for key-reuse or knowing when we should re-use key.
+type DecryptMeta struct {
+	Version int
+	Key     []byte
+	Salt    []byte
 }
 
 // Decrypt data, requires the full input (all headers) returned from Encrypt
-func Decrypt(password, encrypted []byte) (plaintext []byte, err error) {
+// It returns some decryption meta pieces (version, key, salt) for use with
+// Encrypt, as well as the plain text.
+func Decrypt(passphrase, encrypted []byte) (meta DecryptMeta, pt []byte, err error) {
+	if bytes.Equal(v0Header, encrypted[:len(v0Header)]) {
+		pt, key, salt, err := decryptV0(passphrase, encrypted)
+		if err != nil {
+			return meta, nil, err
+		}
+
+		return DecryptMeta{Version: 0, Key: key, Salt: salt}, pt, err
+	}
+
 	version, err := verifyMagic(encrypted)
 	if err != nil {
-		return nil, err
+		return meta, nil, err
 	}
 
-	suite, err := cipherSuite(version)
+	c, err := getVersion(version)
 	if err != nil {
-		return nil, err
+		return meta, nil, errors.Errorf("unknown version %d, try upgrading upass", version)
 	}
 
-	// Pull salt out and derive key
-	salt := encrypted[magicLen : magicLen+saltLen]
-	keySize := calcKeySize(suite)
-	key, err := deriveKey(version, password, salt, keySize)
+	pt, key, salt, err := c.decrypt(c, passphrase, encrypted)
 	if err != nil {
-		return nil, err
+		return meta, nil, err
 	}
 
-	ciphers, err := makeCiphers(key, suite)
+	return DecryptMeta{Version: version, Key: key, Salt: salt}, pt, nil
+}
+
+// DeriveKey from a passphrase. It returns both the key that was derived and
+// the salt used to create it.
+func DeriveKey(version int, passphrase []byte) (key, salt []byte, err error) {
+	c, err := getVersion(version)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// Get size of iv
-	blockSize := calcBlockSize(ciphers)
-
-	// Copy the ciphertext to where we can decode it
-	work := make([]byte, len(encrypted)-magicLen-saltLen-blockSize)
-	copy(work, encrypted[magicLen+saltLen+blockSize:])
-
-	iv := encrypted[magicLen+saltLen : magicLen+saltLen+blockSize]
-	ivOffset := len(iv)
-	for i := len(ciphers) - 1; i >= 0; i-- {
-		c := ciphers[i]
-
-		cipherBlockSize := c.BlockSize()
-		// Read iv encrypted reverse since we're doing each algorithm encrypted reverse now
-		cbc := cipher.NewCBCDecrypter(c, iv[ivOffset-cipherBlockSize:ivOffset])
-		ivOffset -= cipherBlockSize
-
-		// decrypt & discard padding
-		cbc.CryptBlocks(work, work)
-		work = pkcs7.Unpad(work)
+	// Secure random salt for passphrase derivation
+	salt = make([]byte, c.saltSize)
+	if n, err := rand.Read(salt); n != c.saltSize || err != nil {
+		return nil, nil, fmt.Errorf("failed to get randomness for salt: %w", err)
 	}
 
-	origShaSum := work[:sha512.Size]
-	plaintext = work[sha512.Size:]
-
-	// Verify integrity
-	sha := sha512.New()
-	_, _ = sha.Write(encrypted[:magicLen])
-	_, _ = sha.Write(salt)
-	_, _ = sha.Write(iv)
-	_, _ = sha.Write(plaintext)
-	shaSum := sha.Sum(nil)
-
-	if !bytes.Equal(origShaSum, shaSum) {
-		return nil, errors.New("integrity of archive could not be verified")
+	key, err = c.keygen(c, passphrase, salt)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	// Remove the header before returning
-	return plaintext, nil
+	return key, salt, nil
+}
+
+func getVersion(version int) (c config, err error) {
+	config, ok := versions[version]
+	if !ok {
+		return config, errors.Errorf("unknown version %d", version)
+	}
+
+	return config, nil
 }
 
 // verifyMagic ensures the magic string is correct and decodes version
@@ -193,34 +208,17 @@ func verifyMagic(in []byte) (version int, err error) {
 	magicString := in[:magicLen/2]
 	versionString := in[magicLen/2 : magicLen]
 
-	if !bytes.Equal(magicStr, magicString) {
+	if !bytes.Equal([]byte(magicStr), magicString) {
 		return 0, ErrInvalidMagic
 	}
 
-	if v, err := strconv.ParseInt(string(versionString), 10, 32); err != nil {
+	v, err := strconv.ParseInt(string(versionString), 10, 32)
+	if err != nil {
 		return 0, ErrInvalidVersion
-	} else {
-		version = int(v)
 	}
 
+	version = int(v)
 	return version, nil
-}
-
-// calcBlockSize for all ciphers together
-func calcBlockSize(ciphers []cipher.Block) (blockSize int) {
-	for i := len(ciphers) - 1; i >= 0; i-- {
-		blockSize += ciphers[i].BlockSize()
-	}
-
-	return blockSize
-}
-
-// calcKeySize for all ciphers together
-func calcKeySize(suite []cipherAlg) (keySize int) {
-	for _, alg := range suite {
-		keySize += alg.KeySize
-	}
-	return keySize
 }
 
 func makeCiphers(key []byte, suite []cipherAlg) ([]cipher.Block, error) {
@@ -238,25 +236,14 @@ func makeCiphers(key []byte, suite []cipherAlg) ([]cipher.Block, error) {
 	return blocks, nil
 }
 
-func cipherSuite(version int) (ciphers []cipherAlg, err error) {
-	suite, ok := cipherSuites[version]
-	if !ok {
-		return nil, fmt.Errorf("cipher suite for version %d not found", version)
-	}
-
-	for _, c := range suite {
-		ciphers = append(ciphers, algorithms[c])
+func cipherSuite(c config) (ciphers []cipherAlg, err error) {
+	for _, a := range c.algs {
+		alg, ok := algorithms[a]
+		if !ok {
+			return nil, errors.Errorf("algorithm not found: %s", a)
+		}
+		ciphers = append(ciphers, alg)
 	}
 
 	return ciphers, nil
-}
-
-// deriveKey returns the same key for any given version/password/salt combination
-func deriveKey(version int, password, salt []byte, ln int) ([]byte, error) {
-	switch version {
-	case 1:
-		return scrypt.Key(password, salt, 524288 /* 2<<18 */, 8, 1, ln)
-	default:
-		return nil, fmt.Errorf("key derivation algorithm for version %d unknown", version)
-	}
 }
