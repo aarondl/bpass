@@ -7,7 +7,7 @@ import (
 	"crypto/sha512"
 	"fmt"
 
-	"github.com/aarondl/upass/pkcs7"
+	"github.com/aarondl/bpass/pkcs7"
 	"golang.org/x/crypto/scrypt"
 )
 

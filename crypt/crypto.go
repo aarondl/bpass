@@ -161,7 +161,7 @@ func Decrypt(passphrase, encrypted []byte) (meta DecryptMeta, pt []byte, err err
 
 	c, err := getVersion(version)
 	if err != nil {
-		return meta, nil, errors.Errorf("unknown version %d, try upgrading upass", version)
+		return meta, nil, errors.Errorf("unknown version %d, try upgrading bpass", version)
 	}
 
 	pt, key, salt, err := c.decrypt(c, passphrase, encrypted)

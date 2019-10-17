@@ -27,6 +27,7 @@
 package blobformat
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -39,24 +40,26 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
+// Keys for the map
 const (
-	keyUser = "user"
-	keyPass = "pass"
-	keyTwoFactor = "twofactor"
-	keyNotes = "notes"
-	keyLabels = "labels"
-	keyUpdated = "updated"
-	keySnapshots = "snapshots"
+	KeyUser      = "user"
+	KeyEmail     = "email"
+	KeyPass      = "pass"
+	KeyTwoFactor = "twofactor"
+	KeyNotes     = "notes"
+	KeyLabels    = "labels"
+	KeyUpdated   = "updated"
+	KeySnapshots = "snapshots"
 )
 
 var (
 	// protectedKeys is a list of keys that cannot be set to a string value
 	protectedKeys = []string{
-		keyTwoFactor, keyNotes, keyUpdated, keyLabels, keySnapshots,
+		KeyTwoFactor, KeyNotes, KeyUpdated, KeyLabels, KeySnapshots,
 	}
 )
 
-// Blob exposes operations on special keys in the blob file structure
+// Blobs exposes operations on special keys in the blob file structure
 // All manipulation should be done via this interface or special keys like
 // updated and snapshots will probably be mishandled.
 type Blobs map[string]interface{}
@@ -64,38 +67,58 @@ type Blobs map[string]interface{}
 // Blob is a context of a single blob
 type Blob struct {
 	Name string
-	B map[string]interface{}
+	B    map[string]interface{}
 }
 
-// Load the format into something manipulatable
-func Load(format []byte) (Blobs, error) {
+// New loads the format into a manipulatable structure
+func New(serialized []byte) (Blobs, error) {
 	blobs := make(map[string]interface{})
-	if err := json.Unmarshal(format, blobs); err != nil {
+
+	dec := json.NewDecoder(bytes.NewReader(serialized))
+	dec.UseNumber()
+	if err := dec.Decode(&blobs); err != nil {
 		return nil, err
 	}
 
 	return blobs, nil
 }
 
+// Save the blobs to bytes
+func (b Blobs) Save() ([]byte, error) {
+	return json.Marshal(b)
+}
+
 // Find searches names of entries using fuzzy search and breaks on /
 // to help organization. The returned list of names is not sorted.
+//
+// If search is empty, all results names returned.
 //
 // Most other commands will require a fully qualified name of an entry to
 // manipulate.
 func (b Blobs) Find(search string) (names []string) {
+	if len(search) == 0 {
+		return b.names()
+	}
+
 	fragments := strings.Split(search, "/")
 	nFrags := len(fragments)
 
-	AllKeys:
+AllKeys:
 	for k := range b {
-		keyFrags := strings.Split(k, "/")
-		if len(keyFrags) != nFrags {
-			continue
-		}
-
-		for i, f := range fragments {
-			if !fuzzy.MatchFold(f, keyFrags[i]) {
+		if len(fragments) == 1 {
+			if !fuzzy.MatchFold(fragments[0], k) {
 				continue AllKeys
+			}
+		} else {
+			keyFrags := strings.Split(k, "/")
+			if len(keyFrags) < nFrags {
+				continue
+			}
+
+			for i, f := range fragments {
+				if !fuzzy.MatchFold(f, keyFrags[i]) {
+					continue AllKeys
+				}
 			}
 		}
 
@@ -105,28 +128,17 @@ func (b Blobs) Find(search string) (names []string) {
 	return names
 }
 
-// Get returns a copy of the entire name'd object. Panics if name is not found.
-func (b Blobs) Get(name string) Blob {
+func (b Blobs) names() (names []string) {
+	for n := range b {
+		names = append(names, n)
+	}
+	return names
+}
+
+// MustFind the entire named object. Panics if name is not found.
+func (b Blobs) MustFind(name string) Blob {
 	obj := b.get(name)
 	return Blob{B: obj, Name: name}
-}
-
-// User for the blob, returns empty string if not set
-func (b Blob) User() string {
-	user, ok := b.B[keyUser]
-	if !ok {
-		return ""
-	}
-	return user.(string)
-}
-
-// Pass for the blob, returns empty string if not set
-func (b Blob) Pass() string {
-	pass, ok := b.B[keyPass]
-	if !ok {
-		return ""
-	}
-	return pass.(string)
 }
 
 // TwoFactor returns an authentication code if a secret key has been set.
@@ -136,7 +148,7 @@ func (b Blob) Pass() string {
 //
 // This uses the TOTP algorithm (Google-Authenticator like).
 func (b Blob) TwoFactor() (string, error) {
-	twoFactorURIIntf := b.B[keyTwoFactor]
+	twoFactorURIIntf := b.B[KeyTwoFactor]
 
 	if twoFactorURIIntf == nil {
 		return "", nil
@@ -163,12 +175,12 @@ func (b Blob) TwoFactor() (string, error) {
 
 // Notes for the blob, returns nil if not set
 func (b Blob) Notes() (notes []string, err error) {
-	return b.getSlice(keyNotes)
+	return b.getSlice(KeyNotes)
 }
 
 // Labels for the blob, nil if none set.
 func (b Blob) Labels() (labels []string, err error) {
-	return b.getSlice(keyLabels)
+	return b.getSlice(KeyLabels)
 }
 
 func (b Blob) getSlice(keyname string) (out []string, err error) {
@@ -185,7 +197,7 @@ func (b Blob) getSlice(keyname string) (out []string, err error) {
 	for i, intf := range intfSlice {
 		s, ok := intf.(string)
 		if !ok {
-			return nil, errors.Errorf("%s[%d] is not in the right format", keyname, i, b.Name)
+			return nil, errors.Errorf("%s[%d] for %s is not in the right format", keyname, i, b.Name)
 		}
 
 		out = append(out, s)
@@ -196,20 +208,27 @@ func (b Blob) getSlice(keyname string) (out []string, err error) {
 
 // Updated timestamp, if not set or invalid will be the zero value for time
 func (b Blob) Updated(name string) time.Time {
-	updatedIntf := b.B[keyUpdated]
+	updatedIntf := b.B[KeyUpdated]
 	if updatedIntf == nil {
 		return time.Time{}
 	}
 
-	var float float64
 	var integer int64
-	var ok bool
-	if integer, ok = updatedIntf.(int64); !ok {
-		if float, ok = updatedIntf.(float64); !ok {
+	switch t := updatedIntf.(type) {
+	case json.Number:
+		var err error
+		integer, err = t.Int64()
+		if err != nil {
 			return time.Time{}
 		}
-
-		integer = int64(float)
+	case int64:
+		integer = t
+	case int:
+		integer = int64(t)
+	case float64:
+		integer = int64(t)
+	default:
+		return time.Time{}
 	}
 
 	return time.Unix(integer, 0)
@@ -221,7 +240,7 @@ func (b Blob) Updated(name string) time.Time {
 // Returns an error if there are no snapshots, if index is out of range
 // or if snapshots is in the wrong format.
 func (b Blob) Snapshot(index int) (snapBlob Blob, err error) {
-	snapsIntf := b.B[keySnapshots]
+	snapsIntf := b.B[KeySnapshots]
 	if snapsIntf == nil {
 		return snapBlob, errors.Errorf("snapshot called on %s which has no snapshots", b.Name)
 	}
@@ -235,7 +254,7 @@ func (b Blob) Snapshot(index int) (snapBlob Blob, err error) {
 		return snapBlob, errors.Errorf("%s has %d snapshot entries but given index: %d", b.Name, len(snaps), index)
 	}
 
-	index = len(snaps)-1-index
+	index = len(snaps) - 1 - index
 	snap, ok := snaps[index].(map[string]interface{})
 	if !ok {
 		return snapBlob, errors.Errorf("snapshot %d is stored in the wrong format for: %s", index, b.Name)
@@ -244,10 +263,10 @@ func (b Blob) Snapshot(index int) (snapBlob Blob, err error) {
 	return Blob{B: snap, Name: b.Name + fmt.Sprintf(":snap%d", index)}, nil
 }
 
-// NHistory returns the number of snapshots saved for the blob. Panics if name
+// NSnapshots returns the number of snapshots saved for the blob. Panics if name
 // is not found or snapshots is not an array of objects.
 func (b Blob) NSnapshots() (int, error) {
-	snapsIntf := b.B[keySnapshots]
+	snapsIntf := b.B[KeySnapshots]
 	if snapsIntf == nil {
 		return 0, nil
 	}
@@ -260,12 +279,9 @@ func (b Blob) NSnapshots() (int, error) {
 	return len(snaps), nil
 }
 
-// Set the key in name to value, properly updates 'updated' and 'snapshots'.
-// If the key is value with special meaning it will panic. To update
-// things like: labels, notes, twofactor you must use the specific setters.
-func (b Blobs) Set(name, key, value string) {
-	blob := b.Get(name)
-
+// Get a specific value. Panics if name is not found. Special keys require the
+// use of specific getters: labels, notes, twofactor, updated etc.
+func (b Blobs) Get(name, key, value string) string {
 	key = strings.ToLower(key)
 	for _, p := range protectedKeys {
 		if key == p {
@@ -273,12 +289,37 @@ func (b Blobs) Set(name, key, value string) {
 		}
 	}
 
-	blob.addSnapshot()
-	blob.touchUpdated()
-	blob.B[name] = value
+	blob := b.MustFind(name)
+	return blob.B[key].(string)
 }
 
-// SetTwoFactor loads the totpURL to ensure it contains a totp secret key
+// Set the key in name to value, properly updates 'updated' and 'snapshots'.
+// If the key is value with special meaning it will panic. To update
+// things like: labels, notes, twofactor, updated you must use the specific
+// setters.
+func (b Blobs) Set(name, key, value string) {
+	key = strings.ToLower(key)
+	for _, p := range protectedKeys {
+		if key == p {
+			panic(fmt.Sprintf("key %s cannot be set with Set()", p))
+		}
+	}
+
+	blobIntf, ok := b[name]
+	var blob Blob
+	if ok {
+		blob = Blob{B: blobIntf.(map[string]interface{}), Name: name}
+		blob.addSnapshot()
+	} else {
+		blob = Blob{B: make(map[string]interface{}), Name: name}
+		b[name] = blob.B
+	}
+
+	blob.touchUpdated()
+	blob.B[key] = value
+}
+
+// SetTwofactor loads the totpURL to ensure it contains a totp secret key
 // before setting the value.
 //
 // This function accepts values in two formats, it may be a simple secret
@@ -288,7 +329,7 @@ func (b Blobs) Set(name, key, value string) {
 // Reference for format:
 // https://github.com/google/google-authenticator/wiki/Key-Uri-Format
 func (b Blobs) SetTwofactor(name, uriOrKey string) error {
-	blob := b.Get(name)
+	blob := b.MustFind(name)
 
 	var uri string
 	if strings.HasPrefix(uriOrKey, "otpauth://") {
@@ -297,7 +338,7 @@ func (b Blobs) SetTwofactor(name, uriOrKey string) error {
 		vals := make(url.Values)
 		vals.Set("secret", uriOrKey)
 		uri = fmt.Sprintf("otpauth://totp/%s?%s",
-			url.PathEscape("upass:" + name),
+			url.PathEscape("bpass:"+name),
 			vals.Encode(),
 		)
 	}
@@ -309,13 +350,13 @@ func (b Blobs) SetTwofactor(name, uriOrKey string) error {
 
 	blob.addSnapshot()
 	blob.touchUpdated()
-	blob.B[keyTwoFactor] = uri
+	blob.B[KeyTwoFactor] = uri
 	return nil
 }
 
 // SetNotes on name. Records a snapshot and sets updated.
 func (b Blobs) SetNotes(name string, notes []string) {
-	blob := b.Get(name)
+	blob := b.MustFind(name)
 
 	var uglyConversion []interface{}
 	for _, s := range notes {
@@ -323,14 +364,14 @@ func (b Blobs) SetNotes(name string, notes []string) {
 	}
 
 	blob.touchUpdated()
-	blob.B[keyNotes] = uglyConversion
+	blob.B[KeyNotes] = uglyConversion
 }
 
 // SetLabels on name. Does not record a snapshot, but does update 'updated'.
 // This is because labels are considered part of metadata that's uninteresting
 // and isn't worth a snapshot.
 func (b Blobs) SetLabels(name string, labels []string) {
-	blob := b.Get(name)
+	blob := b.MustFind(name)
 
 	var uglyConversion []interface{}
 	for _, s := range labels {
@@ -338,7 +379,7 @@ func (b Blobs) SetLabels(name string, labels []string) {
 	}
 
 	blob.touchUpdated()
-	blob.B[keyLabels] = uglyConversion
+	blob.B[KeyLabels] = uglyConversion
 }
 
 // get retrieves an entire object without a copy and panics if name is not found
@@ -360,14 +401,14 @@ func (b Blobs) get(name string) map[string]interface{} {
 // touchUpdated refreshes the updated timestamp
 func (b Blob) touchUpdated() {
 	now := time.Now().Unix()
-	b.B[keyUpdated] = now
+	b.B[KeyUpdated] = now
 }
 
 // addSnapshot adds a new snapshot containing all the current values into
 // the blob's snapshot list
 func (b Blob) addSnapshot() {
 	var snaps []interface{}
-	snapsIntf, ok := b.B[keySnapshots]
+	snapsIntf, ok := b.B[KeySnapshots]
 	if !ok {
 		snaps = make([]interface{}, 0, 1)
 	} else {
@@ -375,7 +416,7 @@ func (b Blob) addSnapshot() {
 	}
 
 	snaps = append(snaps, b.snapshot())
-	b.B[keySnapshots] = snaps
+	b.B[KeySnapshots] = snaps
 }
 
 // snapshot creates a deep copy of a map[string]interface{} excluding the
@@ -386,11 +427,13 @@ func (b Blob) snapshot() map[string]interface{} {
 	clone := make(map[string]interface{}, len(b.B))
 	for k, v := range b.B {
 		// Do not include snapshots in the new snapshot
-		if k == keySnapshots {
+		if k == KeySnapshots {
 			continue
 		}
 
 		switch val := v.(type) {
+		case json.Number:
+			clone[k] = val
 		case string:
 			clone[k] = val
 		case float64:
@@ -408,4 +451,3 @@ func (b Blob) snapshot() map[string]interface{} {
 
 	return clone
 }
-

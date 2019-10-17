@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"crypto/cipher"
 
-	"github.com/aarondl/upass/pkcs7"
+	"github.com/aarondl/bpass/pkcs7"
 )
 
 func decryptV0(passphrase, encrypted []byte) (plaintext, key, salt []byte, err error) {
