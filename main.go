@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gookit/color"
+
 	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
 	"github.com/chzyer/readline"
@@ -51,6 +53,10 @@ func main() {
 		}
 		fmt.Printf("error occurred: %+v\n", err)
 		os.Exit(1)
+	}
+
+	if flagNoColor {
+		color.Disable()
 	}
 
 	// setup readline needs to have the filenames parsed and ready

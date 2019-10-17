@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aarondl/bpass/blobformat"
 	"github.com/chzyer/readline"
 )
 
@@ -26,6 +27,12 @@ CD aware commands (omit name|search when cd'd into entry):
  rmnote  <search> <index>    - Delete a note
  label   <search>            - Add labels
  rmlabel <search> <label>    - Remove a label
+
+Clipboard copy shortcuts (equivalent to cp name CMD):
+ pass  <search>       - Copy password to clipboard
+ user  <search>       - Copy username to clipboard
+ email <search>       - Copy email to clipboard
+ totp  <search>       - Copy twofactor to clipboard
 
 Arguments:
   name:   a fully qualified name
@@ -93,6 +100,47 @@ func (r repl) run() error {
 			default:
 				fmt.Println("cd needs an argument")
 			}
+
+		case "cp", "get":
+			name := contextName
+			if len(splits) < 1 || (len(splits) < 2 && len(name) == 0) {
+				errColor.Printf("syntax: %s <search> <key> [index]", cmd)
+				continue
+			}
+
+			if len(name) == 0 {
+				name = splits[0]
+				splits = splits[1:]
+			}
+
+			key := splits[0]
+			splits = splits[1:]
+
+			index := -1
+			if len(splits) != 0 {
+				i, err := strconv.Atoi(splits[0])
+				if err != nil {
+					errColor.Println("Index must be an integer")
+					continue
+				}
+				index = i
+			}
+
+			err = r.ctx.get(name, key, index, cmd == "cp")
+
+		case "totp", blobformat.KeyUser, blobformat.KeyPass, blobformat.KeyEmail:
+			name := contextName
+			if len(splits) < 1 && len(name) == 0 {
+				errColor.Printf("syntax: %s <search>", cmd)
+				continue
+			}
+
+			if len(name) == 0 {
+				name = splits[0]
+				splits = splits[1:]
+			}
+
+			err = r.ctx.get(name, cmd, -1, true)
 
 		case "set":
 			name := contextName

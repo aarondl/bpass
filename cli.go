@@ -47,6 +47,7 @@ cp  name key
 var ()
 
 var (
+	flagNoColor  bool
 	flagRevision uint
 	flagFile     string
 )
@@ -95,6 +96,7 @@ func initCobra(ctx *uiContext) (*cobra.Command, error) {
 	}
 
 	rootCmd.PersistentFlags().StringVarP(&flagFile, "file", "f", "passwd.blob", "Bpass file")
+	rootCmd.Flags().BoolVarP(&flagNoColor, "no-color", "", false, "Disable color output")
 	rootCmd.AddCommand(setCmd, getCmd, showCmd)
 
 	return rootCmd, nil

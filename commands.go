@@ -10,14 +10,18 @@ import (
 	"unicode"
 
 	"github.com/aarondl/bpass/blobformat"
+
+	"github.com/atotto/clipboard"
 	"github.com/gookit/color"
 	"github.com/pkg/errors"
 )
 
 var (
 	errColor         = color.FgLightRed
-	infoColor        = color.FgLightCyan
+	infoColor        = color.FgLightMagenta
 	inputPromptColor = color.FgYellow
+	keyColor         = color.FgLightGreen
+	passColor        = color.New(color.FgBlue, color.BgBlue)
 )
 
 func (u *uiContext) addNewInterruptible(name string) error {
@@ -161,6 +165,127 @@ func (u *uiContext) listByLabels(wantLabels []string) error {
 	return nil
 }
 
+func (u *uiContext) get(search, key string, index int, copy bool) error {
+	name, ok := u.singleName(search)
+	if !ok {
+		return nil
+	}
+
+	entry := u.store.MustFind(name)
+
+	switch key {
+	case "label", blobformat.KeyLabels:
+		labels, err := entry.Labels()
+		if err != nil {
+			errColor.Println("failed to retrieve labels:", err)
+			return nil
+		}
+
+		// Single label
+		if index > 0 {
+			index--
+			if index >= len(labels) {
+				errColor.Printf("There is only %d labels", len(labels))
+				return nil
+			}
+
+			if copy {
+				copyToClipboard(labels[index])
+			} else {
+				showKeyValue(fmt.Sprintf("label[%d]", index+1), labels[index], 0, 0)
+			}
+			return nil
+		}
+
+		if copy {
+			copyToClipboard(strings.Join(labels, ","))
+		} else {
+			showLabels(labels, 0, 0)
+		}
+
+	case "note", blobformat.KeyNotes:
+		notes, err := entry.Notes()
+		if err != nil {
+			errColor.Println("failed to retrieve notes:", err)
+			return nil
+		}
+
+		// Single note
+		if index > 0 {
+			index--
+			if index >= len(notes) {
+				errColor.Printf("There is only %d labels", len(notes))
+				return nil
+			}
+
+			if copy {
+				copyToClipboard(notes[index])
+			} else {
+				showKeyValue(fmt.Sprintf("note[%d]", index+1), "", 0, 0)
+				fmt.Println(notes[index])
+			}
+			return nil
+		}
+
+		if copy {
+			copyToClipboard(strings.Join(notes, "\n"))
+		} else {
+			showNotes(notes, 0, 0)
+		}
+
+	case "totp", blobformat.KeyTwoFactor:
+		val, err := entry.TwoFactor()
+		if err != nil {
+			errColor.Println(err)
+			return nil
+		}
+
+		if len(val) == 0 {
+			errColor.Println("twofactor is not set for", name)
+		}
+
+		if copy {
+			copyToClipboard(val)
+		} else {
+			showKeyValue("totp", val, 0, 0)
+		}
+	case blobformat.KeyUpdated:
+		value := entry.Updated().Format(time.RFC3339)
+		if copy {
+			copyToClipboard(value)
+		} else {
+			showKeyValue("updated", value, 0, 0)
+		}
+	case blobformat.KeySnapshots:
+		n, err := entry.NSnapshots()
+		if err != nil {
+			errColor.Println(err)
+			return nil
+		}
+		if copy {
+			copyToClipboard(strconv.Itoa(n))
+		} else {
+			showKeyValue("snaps", strconv.Itoa(n), 0, 0)
+		}
+	default:
+		value := entry.Get(key)
+		if len(value) == 0 {
+			errColor.Printf("key %s is not set", key)
+			return nil
+		}
+
+		if copy {
+			copyToClipboard(value)
+		} else if key == blobformat.KeyPass {
+			showHidden(key, value, 0, 0)
+		} else {
+			showKeyValue(key, value, 0, 0)
+		}
+	}
+
+	return nil
+}
+
 func (u *uiContext) set(search, key, value string) error {
 	name, ok := u.singleName(search)
 	if !ok {
@@ -191,7 +316,7 @@ func (u *uiContext) set(search, key, value string) error {
 
 		notes = append(notes, value)
 		u.store.SetNotes(name, notes)
-	case blobformat.KeyTwoFactor:
+	case "totp", blobformat.KeyTwoFactor:
 		if err := u.store.SetTwofactor(name, value); err != nil {
 			errColor.Println(err)
 			return nil
@@ -369,15 +494,14 @@ func (u *uiContext) getPassword() (string, error) {
 		}
 		return strconv.Itoa(n)
 	}
-	settingColor := color.FgLightGreen
 	setSetting := func(name string, splits []string, n *int) {
 		if len(splits) == 1 {
 			if *n >= 0 {
 				*n = -1
-				fmt.Printf("%s: off\n", settingColor.Sprint(name))
+				fmt.Printf("%s: off\n", keyColor.Sprint(name))
 			} else {
 				*n = 0
-				fmt.Printf("%s: on\n", settingColor.Sprint(name))
+				fmt.Printf("%s: on\n", keyColor.Sprint(name))
 			}
 			return
 		}
@@ -388,7 +512,7 @@ func (u *uiContext) getPassword() (string, error) {
 			return
 		}
 		*n = i
-		fmt.Printf("%s: at least %d\n", settingColor.Sprint(name), i)
+		fmt.Printf("%s: at least %d\n", keyColor.Sprint(name), i)
 	}
 
 	length := 32
@@ -454,7 +578,7 @@ func (u *uiContext) getPassword() (string, error) {
 				fmt.Println("new length was not an integer")
 				continue
 			}
-			fmt.Printf("%s: %d\n", settingColor.Sprint("length"), newLen)
+			fmt.Printf("%s: %d\n", keyColor.Sprint("length"), newLen)
 			length = newLen
 		}
 	}
@@ -465,9 +589,9 @@ func (u *uiContext) show(search string, snapshot int) error {
 	if !ok {
 		return nil
 	}
-	got := u.store.MustFind(name)
+	entry := u.store.MustFind(name)
 
-	snaps, err := got.NSnapshots()
+	snaps, err := entry.NSnapshots()
 	if err != nil {
 		return errors.Wrap(err, "failed to get snapshot count")
 	}
@@ -477,7 +601,7 @@ func (u *uiContext) show(search string, snapshot int) error {
 			return nil
 		}
 
-		got, err = got.Snapshot(snapshot)
+		entry, err = entry.Snapshot(snapshot)
 		if err != nil {
 			errColor.Println(err)
 			return nil
@@ -485,60 +609,93 @@ func (u *uiContext) show(search string, snapshot int) error {
 	}
 
 	width := 8 // Hardcoded max of the known keys, sad, I know
-	arbitrary := got.ArbitraryKeys()
+	arbitrary := entry.ArbitraryKeys()
 	for _, k := range arbitrary {
 		if len(k) > width {
 			width = len(k) + 1 // +1 for : character
 		}
 	}
 	width *= -1
+	indent := 2
 
-	kc := color.FgLightGreen
-	passColor := color.New(color.FgBlue, color.BgBlue)
-	fmt.Printf("%s %s\n", kc.Sprint("name:"), name)
-	fmt.Printf("  %s %s\n", kc.Sprintf("%*s", width, "user:"), got.Get(blobformat.KeyUser))
-	fmt.Printf("  %s %s\n", kc.Sprintf("%*s", width, "email:"), got.Get(blobformat.KeyEmail))
-	fmt.Printf("  %s %s\n", kc.Sprintf("%*s", width, "pass:"), passColor.Sprint(got.Get(blobformat.KeyPass)))
-	t, err := got.TwoFactor()
+	showKeyValue(blobformat.KeyUser, entry.Get(blobformat.KeyUser), width, indent)
+	showKeyValue(blobformat.KeyEmail, entry.Get(blobformat.KeyEmail), width, indent)
+	showHidden(blobformat.KeyPass, entry.Get(blobformat.KeyPass), width, indent)
+	t, err := entry.TwoFactor()
 	if err != nil {
 		fmt.Println("error retrieving two factor:", err)
 	} else if len(t) != 0 {
-		fmt.Printf("  %s %s\n", kc.Sprintf("%*s", width, "totp:"), t)
+		showKeyValue("totp", t, width, indent)
 	}
 
-	labels, err := got.Labels()
+	labels, err := entry.Labels()
 	if err != nil {
 		fmt.Println("error fetching labels:", err)
 	} else if len(labels) > 0 {
-		fmt.Printf("  %s %s\n", kc.Sprintf("%*s", width, "labels:"), strings.Join(labels, ", "))
+		showLabels(labels, width, indent)
 	}
 
-	notes, err := got.Notes()
+	notes, err := entry.Notes()
 	if err != nil {
 		fmt.Println("error retrieving notes:", err)
 	} else if len(notes) > 0 {
-		fmt.Printf("  %s\n", kc.Sprintf("%*s", width, "notes:"))
-		for i, note := range notes {
-			// Format it nicely with newlines and indentation
-			note = strings.ReplaceAll(note, "\n", "\n        ")
-			fmt.Printf("    %s%s\n", kc.Sprintf("%-4s", strconv.Itoa(i+1)+":"), note)
-		}
+		showNotes(notes, width, indent)
 	}
 
 	sort.Strings(arbitrary)
 	for _, k := range arbitrary {
-		fmt.Printf("  %s %s\n", kc.Sprintf("%*s", width, k+":"), got.Get(k))
+		showKeyValue(k, entry.Get(k), width, indent)
 	}
 
-	if update := got.Updated(); !update.IsZero() {
-		fmt.Printf("  %s %s\n", kc.Sprintf("%*s", width, "updated:"), update.Format(time.RFC3339))
+	if update := entry.Updated(); !update.IsZero() {
+		showKeyValue("updated", update.Format(time.RFC3339), width, indent)
 	}
 
 	if snaps > 0 && snapshot == 0 {
-		fmt.Printf("  %s %d\n", kc.Sprintf("%*s", width, "snaps:"), snaps)
+		showKeyValue("snaps", strconv.Itoa(snaps), width, indent)
 	}
 
 	return nil
+}
+
+func showKeyValue(key, value string, width, indent int) {
+	ind := strings.Repeat(" ", indent)
+	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, key+":"), value)
+}
+
+func showHidden(key, value string, width, indent int) {
+	ind := strings.Repeat(" ", indent)
+	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, key+":"), passColor.Sprint(value))
+}
+
+func showLabels(labels []string, width, indent int) {
+	ind := strings.Repeat(" ", indent)
+	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, "labels:"), strings.Join(labels, ", "))
+}
+
+func showNotes(notes []string, width, indent int) {
+	noteIndent := indent * 2
+	if noteIndent == 0 {
+		noteIndent += 2
+	}
+	ind := strings.Repeat(" ", indent)
+
+	fmt.Printf("%s%s\n", ind, keyColor.Sprintf("%*s", width, "notes:"))
+	for i, note := range notes {
+		showNote(i, note, noteIndent)
+	}
+}
+
+func showNote(number int, note string, indent int) {
+	firstInd := strings.Repeat(" ", indent)
+	otherInd := strings.Repeat(" ", indent+4)
+	for i, line := range strings.Split(note, "\n") {
+		if i == 0 {
+			fmt.Printf("%s%s%s\n", firstInd, keyColor.Sprintf("%-4s", strconv.Itoa(number+1)+":"), line)
+			continue
+		}
+		fmt.Printf("%s%s\n", otherInd, line)
+	}
 }
 
 func (u *uiContext) prompt(prompt string) (string, error) {
@@ -560,6 +717,10 @@ func (u *uiContext) singleName(search string) (string, bool) {
 		errColor.Printf("no matches for search: %s\n", search)
 		return "", false
 	case 1:
+		if search != names[0] {
+			infoColor.Printf("using: %s\n", names[0])
+		}
+
 		return names[0], true
 	}
 
@@ -592,4 +753,14 @@ func validateLabel(labels []string, label string) bool {
 	}
 
 	return true
+}
+
+func copyToClipboard(txt string) {
+	err := clipboard.WriteAll(txt)
+	if err != nil {
+		errColor.Println("Failed to copy text to clipboard")
+		return
+	}
+
+	infoColor.Println("Copied value to clipboard")
 }
