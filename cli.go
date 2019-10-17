@@ -38,9 +38,10 @@ findlabel <label1,label2>
 ls [name]
 cd name
 rm name
+show name
 set name key value
-get name key value
-cp  name key value
+get name key
+cp  name key
 */
 
 var ()

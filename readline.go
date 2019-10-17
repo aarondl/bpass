@@ -7,19 +7,28 @@ import (
 	"github.com/chzyer/readline"
 )
 
+var (
+	normalPrompt = "(%s)> "
+	dirPrompt    = "(%s):%s> "
+)
+
 func newReadline(ctx *uiContext, filename string) (*readline.Instance, error) {
 	return readline.NewEx(readlineBasicConfig(ctx))
 }
 
 func readlineResetPrompt(ctx *uiContext) {
-	ctx.rl.SetPrompt(fmt.Sprintf("(%s)> ", ctx.shortFilename))
+	ctx.rl.SetPrompt(fmt.Sprintf(normalPrompt, ctx.shortFilename))
+}
+
+func readlineDirPrompt(ctx *uiContext, dir string) {
+	ctx.rl.SetPrompt(fmt.Sprintf(dirPrompt, ctx.shortFilename, dir))
 }
 
 func readlineBasicConfig(ctx *uiContext) *readline.Config {
 	completer := readlineCompleter(ctx)
 
 	return &readline.Config{
-		Prompt: fmt.Sprintf("(%s)> ", ctx.shortFilename),
+		Prompt: fmt.Sprintf(normalPrompt, ctx.shortFilename),
 
 		HistoryFile:            "",
 		HistoryLimit:           -1,
