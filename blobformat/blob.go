@@ -171,11 +171,11 @@ func (b Blob) Snapshot(index int) (snapBlob Blob, err error) {
 		return snapBlob, errors.Errorf("snapshots for %s are stored in the wrong format", b.Name)
 	}
 
-	if index < 0 || index >= len(snaps) {
+	if index < 0 || index > len(snaps) {
 		return snapBlob, errors.Errorf("%s has %d snapshot entries but given index: %d", b.Name, len(snaps), index)
 	}
 
-	index = len(snaps) - 1 - index
+	index = len(snaps) - index
 	snap, ok := snaps[index].(map[string]interface{})
 	if !ok {
 		return snapBlob, errors.Errorf("snapshot %d is stored in the wrong format for: %s", index, b.Name)

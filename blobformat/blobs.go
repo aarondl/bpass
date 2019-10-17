@@ -82,7 +82,7 @@ func (b Blobs) names() (names []string) {
 	return names
 }
 
-// MustFind the entire named object. Panics if name is not found.
+// MustFind named object. Panics if name is not found.
 func (b Blobs) MustFind(name string) Blob {
 	obj := b.get(name)
 	return Blob{B: obj, Name: name}

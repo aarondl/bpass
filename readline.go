@@ -1,8 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"os"
+	"sort"
+
+	"github.com/gookit/color"
 
 	"github.com/chzyer/readline"
 )
@@ -10,25 +12,15 @@ import (
 var (
 	normalPrompt = "(%s)> "
 	dirPrompt    = "(%s):%s> "
+
+	promptColor = color.FgLightBlue
 )
 
 func newReadline(ctx *uiContext, filename string) (*readline.Instance, error) {
-	return readline.NewEx(readlineBasicConfig(ctx))
-}
-
-func readlineResetPrompt(ctx *uiContext) {
-	ctx.rl.SetPrompt(fmt.Sprintf(normalPrompt, ctx.shortFilename))
-}
-
-func readlineDirPrompt(ctx *uiContext, dir string) {
-	ctx.rl.SetPrompt(fmt.Sprintf(dirPrompt, ctx.shortFilename, dir))
-}
-
-func readlineBasicConfig(ctx *uiContext) *readline.Config {
 	completer := readlineCompleter(ctx)
 
-	return &readline.Config{
-		Prompt: fmt.Sprintf(normalPrompt, ctx.shortFilename),
+	config := &readline.Config{
+		Prompt: promptColor.Sprintf(normalPrompt, ctx.shortFilename),
 
 		HistoryFile:            "",
 		HistoryLimit:           -1,
@@ -45,30 +37,42 @@ func readlineBasicConfig(ctx *uiContext) *readline.Config {
 
 		UniqueEditLine: false,
 	}
-}
 
-func readlineListenConfig(ctx *uiContext, listen listenFunc) *readline.Config {
-	cfg := readlineBasicConfig(ctx)
-	cfg.SetListener(listen)
-	return cfg
+	return readline.NewEx(config)
 }
-
-type listenFunc func(line []rune, pos int, key rune) (newline []rune, newPos int, ok bool)
 
 func readlineCompleter(ctx *uiContext) readline.AutoCompleter {
 	return readline.NewPrefixCompleter(
-		readline.PcItem("set",
-			readline.PcItemDynamic(ctx.keyComplete,
+		readline.PcItem("get",
+			readline.PcItemDynamic(ctx.readlineKeyComplete,
 				readline.PcItem("email"),
 				readline.PcItem("user"),
 				readline.PcItem("pass"),
 			),
 		),
 		readline.PcItem("email",
-			readline.PcItemDynamic(ctx.keyComplete),
+			readline.PcItemDynamic(ctx.readlineKeyComplete),
 		),
 		readline.PcItem("user",
-			readline.PcItemDynamic(ctx.keyComplete),
+			readline.PcItemDynamic(ctx.readlineKeyComplete),
 		),
 	)
+}
+
+func (u *uiContext) readlineKeyComplete(s string) []string {
+	if u.store == nil {
+		return nil
+	}
+
+	names := u.store.Find("")
+	sort.Strings(names)
+	return names
+}
+
+func (u *uiContext) readlineResetPrompt() {
+	u.rl.SetPrompt(promptColor.Sprintf(normalPrompt, u.shortFilename))
+}
+
+func (u *uiContext) readlineDirPrompt(dir string) {
+	u.rl.SetPrompt(promptColor.Sprintf(dirPrompt, u.shortFilename, dir))
 }

@@ -51,11 +51,19 @@ var (
 	flagFile     string
 )
 
+type cliContext struct {
+	ctx *uiContext
+}
+
 func initCobra(ctx *uiContext) (*cobra.Command, error) {
+	cli := cliContext{
+		ctx: ctx,
+	}
+
 	rootCmd := &cobra.Command{
 		Use:           "bpass",
 		Short:         "Command line password manager",
-		RunE:          ctx.rootHandler,
+		RunE:          cli.rootHandler,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -63,21 +71,21 @@ func initCobra(ctx *uiContext) (*cobra.Command, error) {
 	setCmd := &cobra.Command{
 		Use:           "set [flags] <name> <key> <value>",
 		Short:         "Set a key-value on an entry",
-		RunE:          ctx.setHandler,
+		RunE:          cli.setHandler,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	getCmd := &cobra.Command{
 		Use:           "get [flags] <name> <key>",
 		Short:         "Get a value by key on an entry",
-		RunE:          ctx.getHandler,
+		RunE:          cli.getHandler,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	showCmd := &cobra.Command{
 		Use:           "show [flags] <name>",
 		Short:         "Show an entire entry",
-		RunE:          ctx.showHandler,
+		RunE:          cli.showHandler,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
@@ -87,27 +95,29 @@ func initCobra(ctx *uiContext) (*cobra.Command, error) {
 	}
 
 	rootCmd.PersistentFlags().StringVarP(&flagFile, "file", "f", "passwd.blob", "Bpass file")
-
 	rootCmd.AddCommand(setCmd, getCmd, showCmd)
 
 	return rootCmd, nil
 }
 
-func (u *uiContext) rootHandler(cmd *cobra.Command, args []string) error {
-	return u.repl()
+func (c cliContext) rootHandler(cmd *cobra.Command, args []string) error {
+	r := repl{
+		ctx: c.ctx,
+	}
+	return r.run()
 }
 
-func (u *uiContext) setHandler(cmd *cobra.Command, args []string) error {
+func (c cliContext) setHandler(cmd *cobra.Command, args []string) error {
 	fmt.Println("not implemented")
 	return nil
 }
 
-func (u *uiContext) getHandler(cmd *cobra.Command, args []string) error {
+func (c cliContext) getHandler(cmd *cobra.Command, args []string) error {
 	fmt.Println("not implemented")
 	return nil
 }
 
-func (u *uiContext) showHandler(cmd *cobra.Command, args []string) error {
+func (c cliContext) showHandler(cmd *cobra.Command, args []string) error {
 	fmt.Println("not implemented")
 	return nil
 }

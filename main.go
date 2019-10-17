@@ -26,14 +26,6 @@ type uiContext struct {
 	salt []byte
 }
 
-func (u *uiContext) keyComplete(s string) []string {
-	if u.store == nil {
-		return nil
-	}
-
-	return nil
-}
-
 var (
 	version      = "0.0.1"
 	cryptVersion = 1
