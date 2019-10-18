@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,9 +27,8 @@ func (u *uiContext) addNewInterruptible(name string) error {
 	switch err {
 	case nil:
 		return nil
-	case io.EOF:
+	case ErrEnd:
 		errColor.Println("Aborted")
-		u.readlineResetPrompt()
 		return nil
 	default:
 		return err
@@ -142,7 +140,6 @@ func (u *uiContext) remove(name string) error {
 	line, err := u.prompt(inputPromptColor.Sprintf("type %q to proceed: ", name))
 	if err != nil {
 		errColor.Println("Aborted")
-		u.readlineResetPrompt()
 		return nil
 	}
 
@@ -418,8 +415,7 @@ func (u *uiContext) addNoteToEntry(name string) error {
 	oneBlank := false
 	for {
 		line, err := u.prompt(">> ")
-		if err == io.EOF {
-			u.readlineResetPrompt()
+		if err == ErrEnd {
 			break
 		} else if err != nil {
 			return err
@@ -463,8 +459,7 @@ func (u *uiContext) addLabels(search string) error {
 	changed := false
 	for {
 		line, err := u.prompt(">> ")
-		if err == io.EOF {
-			u.readlineResetPrompt()
+		if err == ErrEnd {
 			break
 		} else if err != nil {
 			return err
@@ -622,7 +617,7 @@ func (u *uiContext) getPassword() (string, error) {
 		case choice == "y":
 			return password, nil
 		case choice == "m":
-			b, err := u.rl.ReadPassword(inputPromptColor.Sprint("enter new password: "))
+			b, err := u.term.LineHidden(inputPromptColor.Sprint("enter new password: "))
 			return string(b), err
 		case choice == "?":
 			// Do nothing, and don't regen
@@ -763,12 +758,10 @@ func showNote(number int, note string, indent int) {
 }
 
 func (u *uiContext) prompt(prompt string) (string, error) {
-	u.rl.SetPrompt(prompt)
-	line, err := u.rl.Readline()
+	line, err := u.term.Line(prompt)
 	if err != nil {
 		return "", err
 	}
-	u.readlineResetPrompt()
 
 	return line, nil
 }

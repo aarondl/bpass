@@ -1,19 +1,39 @@
 package main
 
 import (
-	"os"
-	"sort"
-
-	"github.com/gookit/color"
-
-	"github.com/chzyer/readline"
+	"errors"
+	"io"
 )
 
+// Handle-able error codes that arise from line editors
 var (
-	normalPrompt = "(%s)> "
-	dirPrompt    = "(%s):%s> "
+	ErrInterrupt = errors.New("Interrupt")
+	ErrEnd       = io.EOF
+)
 
-	promptColor = color.FgLightBlue
+// LineEditor should provide decent line editing abilities like up/down arrow
+// history, left/right arrow cursor movement, hidden password entry etc.
+type LineEditor interface {
+	// Line returns a line of text as read from the user
+	Line(prompt string) (string, error)
+	// LineHidden returns a line of text as read from the user, but does not
+	// show what's typed to the user.
+	LineHidden(prompt string) (string, error)
+
+	// AddHistory puts line into the history. It should be called when a valid
+	// command has occurred.
+	AddHistory(line string)
+
+	// SetEntryCompleter is used to allow a line editor to provide completion
+	// for entries.
+	SetEntryCompleter(func(string) []string)
+
+	// Close the line editor, restoring any terminal magic to its proper place
+	Close() error
+}
+
+/*
+var (
 )
 
 func newReadline(ctx *uiContext, filename string) (*readline.Instance, error) {
@@ -42,56 +62,6 @@ func newReadline(ctx *uiContext, filename string) (*readline.Instance, error) {
 }
 
 func readlineCompleter(ctx *uiContext) readline.AutoCompleter {
-	return readline.NewPrefixCompleter(
-		readline.PcItem("add"),
-		readline.PcItem("rm", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("mv", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("ls"),
-		readline.PcItem("cd", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("show", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("set",
-			readline.PcItemDynamic(ctx.readlineKeyComplete,
-				readline.PcItem("email"),
-				readline.PcItem("user"),
-				readline.PcItem("pass"),
-				readline.PcItem("totp"),
-				readline.PcItem("twofactor"),
-				readline.PcItem("labels"),
-				readline.PcItem("notes"),
-			),
-		),
-		readline.PcItem("get",
-			readline.PcItemDynamic(ctx.readlineKeyComplete,
-				readline.PcItem("email"),
-				readline.PcItem("user"),
-				readline.PcItem("pass"),
-				readline.PcItem("totp"),
-				readline.PcItem("twofactor"),
-				readline.PcItem("labels"),
-				readline.PcItem("notes"),
-				readline.PcItem("updated"),
-			),
-		),
-		readline.PcItem("cp",
-			readline.PcItemDynamic(ctx.readlineKeyComplete,
-				readline.PcItem("email"),
-				readline.PcItem("user"),
-				readline.PcItem("pass"),
-				readline.PcItem("totp"),
-				readline.PcItem("twofactor"),
-				readline.PcItem("labels"),
-				readline.PcItem("notes"),
-			),
-		),
-		readline.PcItem("note", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("rmnote", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("label", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("rmlabel", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("pass", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("user", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("email", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-		readline.PcItem("totp", readline.PcItemDynamic(ctx.readlineKeyComplete)),
-	)
 }
 
 func (u *uiContext) readlineKeyComplete(s string) []string {
@@ -104,6 +74,10 @@ func (u *uiContext) readlineKeyComplete(s string) []string {
 	return names
 }
 
+	normalPrompt = "(%s)> "
+	dirPrompt    = "(%s):%s> "
+
+	promptColor = color.FgLightBlue
 func (u *uiContext) readlineResetPrompt() {
 	if len(u.promptDir) != 0 {
 		u.rl.SetPrompt(promptColor.Sprintf(dirPrompt, u.shortFilename, u.promptDir))
@@ -111,3 +85,5 @@ func (u *uiContext) readlineResetPrompt() {
 		u.rl.SetPrompt(promptColor.Sprintf(normalPrompt, u.shortFilename))
 	}
 }
+
+*/

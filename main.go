@@ -10,18 +10,18 @@ import (
 
 	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
-	"github.com/chzyer/readline"
+
+	"github.com/gookit/color"
 )
 
 type uiContext struct {
+	term LineEditor
+
 	filename      string
 	shortFilename string
 
-	promptDir string
-
+	// Decrypted and decoded storage
 	store blobformat.Blobs
-	rl    *readline.Instance
-
 	// for later encryption
 	key  []byte
 	salt []byte
@@ -40,57 +40,59 @@ func main() {
 		return
 	}
 
+	if flagNoColor {
+		color.Disable()
+	}
+
 	var err error
 	ctx := new(uiContext)
+	ctx.filename, err = filepath.Abs(flagFile)
+	if err != nil {
+		fmt.Printf("failed to find the absolute path to: %q\n", flagFile)
+		os.Exit(1)
+	}
+	ctx.shortFilename = shortPath(ctx.filename)
+	r := repl{ctx: ctx}
 
 	// setup readline needs to have the filenames parsed and ready
 	// to use from above
-	if err = ctx.setupReadline(); err != nil {
-		fmt.Printf("failed to load file: %+v", err)
-		os.Exit(1)
+	if err = setupLineEditor(ctx); err != nil {
+		fmt.Printf("failed to setup line editor: %+v", err)
+		goto Exit
 	}
 
 	// loadBlob uses readline and the filenames to load the blob
 	if err = ctx.loadBlob(); err != nil {
 		fmt.Printf("failed to load file: %+v", err)
-		os.Exit(1)
+		goto Exit
 	}
 
-	r := repl{ctx: ctx}
 	if err = r.run(); err != nil {
-		if err == readline.ErrInterrupt {
+		if err == ErrInterrupt {
 			fmt.Println("exiting, did not save file")
-			os.Exit(1)
+			goto Exit
 		}
 		fmt.Printf("error occurred: %+v\n", err)
-		os.Exit(1)
+		goto Exit
 	}
 
 	// save the changed data
 	if err = ctx.saveBlob(); err != nil {
 		fmt.Printf("failed to save file: %+v\n", err)
+		goto Exit
+	}
+
+Exit:
+	if err = ctx.term.Close(); err != nil {
+		fmt.Println("failed to close terminal properly:", err)
+	}
+	if err != nil {
 		os.Exit(1)
 	}
 }
 
-func (u *uiContext) setupReadline() error {
-	var err error
-	u.filename, err = filepath.Abs(flagFile)
-	if err != nil {
-		return err
-	}
-	u.shortFilename = shortPath(u.filename)
-
-	u.rl, err = newReadline(u, u.shortFilename)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func (u *uiContext) loadBlob() error {
-	pwd, err := u.rl.ReadPassword(fmt.Sprintf("%s password: ", u.shortFilename))
+	pwd, err := u.term.LineHidden(fmt.Sprintf("%s password: ", u.shortFilename))
 	if err != nil {
 		return err
 	}
@@ -116,7 +118,7 @@ func (u *uiContext) loadBlob() error {
 			return err
 		}
 
-		_, pt, err := crypt.Decrypt(pwd, payload)
+		_, pt, err := crypt.Decrypt([]byte(pwd), payload)
 		if err != nil {
 			return err
 		}
@@ -127,7 +129,7 @@ func (u *uiContext) loadBlob() error {
 	}
 
 	// Derive a new key from the password for later encryption
-	u.key, u.salt, err = crypt.DeriveKey(cryptVersion, pwd)
+	u.key, u.salt, err = crypt.DeriveKey(cryptVersion, []byte(pwd))
 	if err != nil {
 		return err
 	}

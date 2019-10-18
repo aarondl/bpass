@@ -6,8 +6,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gookit/color"
+
 	"github.com/aarondl/bpass/blobformat"
-	"github.com/chzyer/readline"
 )
 
 var replHelp = `Commands:
@@ -42,19 +43,30 @@ Arguments:
   index:  the number representing the item, not 0-based
 `
 
+const (
+	promptColor  = color.FgLightBlue
+	normalPrompt = "(%s)> "
+	dirPrompt    = "(%s):%s> "
+)
+
 type repl struct {
 	ctx *uiContext
+
+	prompt   string
+	ctxEntry string
 }
 
-func (r repl) run() error {
-	var contextName string
+func (r *repl) run() error {
+	r.prompt = promptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
+	r.ctxEntry = ""
 
 	for {
-		line, err := r.ctx.rl.Readline()
+		unknownCmd := false
+		line, err := r.ctx.term.Line(r.prompt)
 		switch err {
-		case readline.ErrInterrupt:
+		case ErrInterrupt:
 			return err
-		case io.EOF:
+		case ErrEnd:
 			// All done
 			return nil
 		case nil:
@@ -96,9 +108,9 @@ func (r repl) run() error {
 			name := splits[0]
 			err = r.ctx.remove(name)
 
-			if err == nil && name == contextName {
-				r.ctx.promptDir = contextName
-				r.ctx.readlineResetPrompt()
+			if err == nil && r.ctxEntry == name {
+				r.ctxEntry = ""
+				r.prompt = promptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 			}
 
 		case "ls":
@@ -111,23 +123,20 @@ func (r repl) run() error {
 		case "cd":
 			switch len(splits) {
 			case 0:
-				contextName = ""
-				r.ctx.promptDir = ""
-				r.ctx.readlineResetPrompt()
+				r.prompt = promptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 			case 1:
 				name, ok := r.ctx.singleName(splits[0])
 				if !ok {
 					continue
 				}
-				contextName = name
-				r.ctx.promptDir = name
-				r.ctx.readlineResetPrompt()
+				r.ctxEntry = name
+				r.prompt = promptColor.Sprintf(dirPrompt, r.ctx.shortFilename, r.ctxEntry)
 			default:
 				fmt.Println("cd needs an argument")
 			}
 
 		case "cp", "get":
-			name := contextName
+			name := r.ctxEntry
 			if len(splits) < 1 || (len(splits) < 2 && len(name) == 0) {
 				errColor.Printf("syntax: %s <search> <key> [index]", cmd)
 				continue
@@ -154,7 +163,7 @@ func (r repl) run() error {
 			err = r.ctx.get(name, key, index, cmd == "cp")
 
 		case "totp", blobformat.KeyUser, blobformat.KeyPass, blobformat.KeyEmail:
-			name := contextName
+			name := r.ctxEntry
 			if len(splits) < 1 && len(name) == 0 {
 				errColor.Printf("syntax: %s <search>", cmd)
 				continue
@@ -168,7 +177,7 @@ func (r repl) run() error {
 			err = r.ctx.get(name, cmd, -1, true)
 
 		case "set":
-			name := contextName
+			name := r.ctxEntry
 			var key, value string
 			showHelpErr := false
 			doPassSet := false
@@ -216,7 +225,6 @@ func (r repl) run() error {
 				err = r.ctx.set(name, key, "")
 				if err == io.EOF {
 					errColor.Println("Aborted")
-					r.ctx.readlineResetPrompt()
 				} else if err != nil {
 					break
 				}
@@ -244,7 +252,7 @@ func (r repl) run() error {
 			err = r.ctx.set(name, key, value)
 
 		case "note":
-			name := contextName
+			name := r.ctxEntry
 			if len(name) == 0 {
 				if len(splits) == 0 {
 					errColor.Println("syntax: note <search>")
@@ -256,7 +264,7 @@ func (r repl) run() error {
 			err = r.ctx.addNote(name)
 
 		case "rmnote":
-			name := contextName
+			name := r.ctxEntry
 			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
 				errColor.Println("syntax: rmnote <search> <index>")
 				continue
@@ -276,7 +284,7 @@ func (r repl) run() error {
 			err = r.ctx.deleteNote(name, number)
 
 		case "label":
-			name := contextName
+			name := r.ctxEntry
 			if len(name) == 0 {
 				if len(splits) == 0 {
 					errColor.Println("syntax: label <search>")
@@ -288,7 +296,7 @@ func (r repl) run() error {
 			err = r.ctx.addLabels(name)
 
 		case "rmlabel":
-			name := contextName
+			name := r.ctxEntry
 			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
 				errColor.Println("syntax: rmlabel <search> <label>")
 				continue
@@ -310,7 +318,7 @@ func (r repl) run() error {
 			err = r.ctx.listByLabels(splits)
 
 		case "show":
-			name := contextName
+			name := r.ctxEntry
 			snapshot := 0
 			if len(name) == 0 {
 				// We need to get a name
@@ -333,11 +341,17 @@ func (r repl) run() error {
 		case "help":
 			fmt.Println(replHelp)
 		default:
-			fmt.Println(`unknown command, try "help"`)
+			unknownCmd = true
 		}
 
 		if err != nil {
 			return err
+		}
+
+		if unknownCmd {
+			fmt.Println(`unknown command, try "help"`)
+		} else {
+			r.ctx.term.AddHistory(line)
 		}
 	}
 }
