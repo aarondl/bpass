@@ -1,0 +1,118 @@
+name: build and test
+on:
+  push:
+    tags:
+      - v*
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: [1.13.2]
+    steps:
+      - name: go
+        uses: actions/setup-go@v1
+        with:
+          go-version: ${{matrix.go}}
+
+      - name: checkout
+        uses: actions/checkout@v1
+        with: { fetch-depth: 1 }
+
+      - name: deps
+        run: go mod download
+        env: { GOPROXY: 'https://proxy.golang.org' }
+
+      - name: test
+        run: go test ./...
+
+  build:
+    name: build
+    needs: [test]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: [1.13.2]
+    steps:
+      - name: go
+        uses: actions/setup-go@v1
+        with:
+          go-version: ${{matrix.go}}
+
+      - name: checkout
+        uses: actions/checkout@v1
+        with: { fetch-depth: 1 }
+
+      - name: deps
+        run: go mod download
+        env: { GOPROXY: 'https://proxy.golang.org' }
+
+      - name: build-linux
+        run: go build -o bpass -trimpath -ldflags '-X main.version=${{github.ref}}'
+        env:
+          GOOS: linux
+          GOARCH: amd64
+
+      - name: package-linux
+        run: tar czf bpass-linux-x86_64.tar.gz bpass && rm bpass
+
+      - name: build-darwin
+        run: go build -o bpass -trimpath -ldflags '-X main.version=${{github.ref}}'
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+
+      - name: package-darwin
+        run: tar czf bpass-darwin-x86_64.tar.gz bpass && rm bpass
+
+      - name: build-windows
+        run: go build -o bpass.exe -trimpath -ldflags '-X main.version=${{github.ref}}'
+        env:
+          GOOS: windows
+          GOARCH: amd64
+
+      - name: package-windows
+        run: zip bpass-windows-x86_64.zip bpass.exe && rm bpass.exe
+
+      - name: create gh release
+        id: create_release
+        uses: actions/create-release@v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: true
+          prerelease: false
+      
+      - name: upload linux artifact
+        uses: actions/upload-release-asset@v1.0.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./bpass-linux-x86_64.tar.gz
+          asset_name: bpass-linux-x86_64.tar.gz 
+          asset_content_type: application/gzip
+
+      - name: upload darwin artifact
+        uses: actions/upload-release-asset@v1.0.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./bpass-darwin-x86_64.tar.gz
+          asset_name: bpass-darwin-x86_64.tar.gz 
+          asset_content_type: application/gzip
+
+      - name: upload windows artifact
+        uses: actions/upload-release-asset@v1.0.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./bpass-windows-x86_64.zip
+          asset_name: bpass-windows-x86_64.zip
+          asset_content_type: application/zip
