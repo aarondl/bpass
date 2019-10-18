@@ -43,7 +43,8 @@ func newReadline(ctx *uiContext, filename string) (*readline.Instance, error) {
 
 func readlineCompleter(ctx *uiContext) readline.AutoCompleter {
 	return readline.NewPrefixCompleter(
-		readline.PcItem("new"),
+		readline.PcItem("add"),
+		readline.PcItem("rm", readline.PcItemDynamic(ctx.readlineKeyComplete)),
 		readline.PcItem("ls"),
 		readline.PcItem("cd", readline.PcItemDynamic(ctx.readlineKeyComplete)),
 		readline.PcItem("show", readline.PcItemDynamic(ctx.readlineKeyComplete)),

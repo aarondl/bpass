@@ -11,7 +11,8 @@ import (
 )
 
 var replHelp = `Commands:
- new <name>   - Create a new entry
+ add <name>   - Add a new entry
+ rm  <name>   - Delete an entry
  ls [search]  - Search for entries, leave [search] blank to list all entries
  cd [search]  - "cd" into an entry, omit argument to return to root
 
@@ -71,12 +72,25 @@ func (r repl) run() error {
 		splits = splits[1:]
 
 		switch cmd {
-		case "new":
+		case "add":
 			if len(splits) < 1 {
-				fmt.Println("syntax: new <name>")
+				fmt.Println("syntax: add <name>")
 				continue
 			}
 			err = r.ctx.addNewInterruptible(splits[0])
+
+		case "rm":
+			if len(splits) < 1 {
+				fmt.Println("syntax: rm <name>")
+				continue
+			}
+			name := splits[0]
+			err = r.ctx.remove(name)
+
+			if err == nil && name == contextName {
+				r.ctx.promptDir = contextName
+				r.ctx.readlineResetPrompt()
+			}
 
 		case "ls":
 			search := ""

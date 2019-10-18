@@ -109,6 +109,33 @@ func (u *uiContext) addNew(name string) error {
 	return nil
 }
 
+func (u *uiContext) remove(name string) error {
+	_, ok := u.store[name]
+	if !ok {
+		errColor.Printf("%s not found\n", name)
+	}
+
+	errColor.Printf("WARNING: This will delete all data associated with %q\n", name)
+	errColor.Println("Including ALL history irrecoverably, are you sure you wish to proceed?")
+	fmt.Println()
+
+	line, err := u.prompt(inputPromptColor.Sprintf("type %q to proceed: ", name))
+	if err != nil {
+		errColor.Println("Aborted")
+		u.readlineResetPrompt()
+		return nil
+	}
+
+	if line == name {
+		delete(u.store, name)
+		errColor.Println("DELETED", name)
+	} else {
+		errColor.Println("Aborted")
+	}
+
+	return nil
+}
+
 func (u *uiContext) list(search string) error {
 	names := u.store.Find(search)
 	if len(names) == 0 {
