@@ -4,46 +4,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-/*
-
-commands:
-bpass open <filename>
-bpass set <name> <key> <value>
-bpass get [--history n] <name> <key>
-bpass (user|pass|email) [--history n] <name>
-bpass show [--history n] <name>
-
-bpass totp [--history n] <name>
-bpass settotp <name> <secret|url>
-
-bpass notes [--history n] <name>
-bpass note <name> <index>
-bpass addnote <name> <note>
-bpass rmnote <name> <index>
-
-bpass labels [--history n] <name>
-bpass addlabel <name> <label>
-bpass rmlabel <name> <label>
-
-bpass new <name>
-bpass ls [name]
-bpass rm <name>
-
-bpass sync
-
-repl:
-findlabel <label1,label2>
-ls [name]
-cd name
-rm name
-show name
-set name key value
-get name key
-cp  name key
-*/
-
-var ()
-
 var (
 	flagNoColor  bool
 	flagRevision uint
