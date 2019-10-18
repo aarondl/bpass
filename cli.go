@@ -27,8 +27,16 @@ func initCobra(ctx *uiContext) (*cobra.Command, error) {
 		SilenceErrors: true,
 	}
 
+	versionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Shows the version",
+		Run:   func(*cobra.Command, []string) {},
+	}
+
 	rootCmd.PersistentFlags().StringVarP(&flagFile, "file", "f", "passwd.blob", "Bpass file")
 	rootCmd.Flags().BoolVarP(&flagNoColor, "no-color", "", false, "Disable color output")
+
+	rootCmd.AddCommand(versionCmd)
 
 	return rootCmd, nil
 }

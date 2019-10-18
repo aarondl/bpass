@@ -31,11 +31,20 @@ type uiContext struct {
 }
 
 var (
-	version      = "0.0.1"
+	version      = "unknown"
 	cryptVersion = 1
 )
 
 func main() {
+	// Everything happens too late, if someone wants the version lets just
+	// give it to them immediately
+	if len(os.Args) >= 2 {
+		if os.Args[1] == "version" {
+			fmt.Println("bpass version", version)
+			return
+		}
+	}
+
 	ctx := new(uiContext)
 
 	rootCmd, err := initCobra(ctx)
