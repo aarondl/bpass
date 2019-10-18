@@ -45,6 +45,7 @@ func readlineCompleter(ctx *uiContext) readline.AutoCompleter {
 	return readline.NewPrefixCompleter(
 		readline.PcItem("add"),
 		readline.PcItem("rm", readline.PcItemDynamic(ctx.readlineKeyComplete)),
+		readline.PcItem("mv", readline.PcItemDynamic(ctx.readlineKeyComplete)),
 		readline.PcItem("ls"),
 		readline.PcItem("cd", readline.PcItemDynamic(ctx.readlineKeyComplete)),
 		readline.PcItem("show", readline.PcItemDynamic(ctx.readlineKeyComplete)),

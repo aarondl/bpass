@@ -41,7 +41,7 @@ func (u *uiContext) addNewInterruptible(name string) error {
 func (u *uiContext) addNew(name string) error {
 	_, exist := u.store[name]
 	if exist {
-		errColor.Printf("%s already exists\n", name)
+		errColor.Printf("%q already exists\n", name)
 		return nil
 	}
 
@@ -109,10 +109,31 @@ func (u *uiContext) addNew(name string) error {
 	return nil
 }
 
+func (u *uiContext) rename(src, dst string) error {
+	_, dstOk := u.store[dst]
+	if dstOk {
+		errColor.Printf("%q already exists\n", dst)
+		return nil
+	}
+
+	obj, srcOk := u.store[src]
+	if !srcOk {
+		errColor.Printf("%q not found\n", src)
+		return nil
+	}
+
+	infoColor.Printf("moved %q => %q\n", src, dst)
+
+	u.store[dst] = obj
+	delete(u.store, src)
+	return nil
+}
+
 func (u *uiContext) remove(name string) error {
 	_, ok := u.store[name]
 	if !ok {
-		errColor.Printf("%s not found\n", name)
+		errColor.Printf("%q not found\n", name)
+		return nil
 	}
 
 	errColor.Printf("WARNING: This will delete all data associated with %q\n", name)
