@@ -5,12 +5,11 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"strconv"
 
 	"github.com/enceve/crypto/camellia"
-	"github.com/geeksbaek/seed"
-	"github.com/pkg/errors"
 	"golang.org/x/crypto/cast5"
 )
 
@@ -72,7 +71,6 @@ var (
 		"AES":      {KeySize: 32, BlockSize: aes.BlockSize, CTOR: aes.NewCipher},
 		"Camellia": {KeySize: 32, BlockSize: camellia.BlockSize, CTOR: camellia.NewCipher},
 		"CAST5":    {KeySize: 16, BlockSize: cast5.BlockSize, CTOR: func(key []byte) (cipher.Block, error) { return cast5.NewCipher(key) }},
-		"SEED":     {KeySize: 16, BlockSize: seed.BlockSize, CTOR: seed.NewCipher},
 	}
 	versions = make(map[int]config)
 )
@@ -161,7 +159,7 @@ func Decrypt(passphrase, encrypted []byte) (meta DecryptMeta, pt []byte, err err
 
 	c, err := getVersion(version)
 	if err != nil {
-		return meta, nil, errors.Errorf("unknown version %d, try upgrading bpass", version)
+		return meta, nil, fmt.Errorf("unknown version %d, try upgrading bpass", version)
 	}
 
 	pt, key, salt, err := c.decrypt(c, passphrase, encrypted)
@@ -197,7 +195,7 @@ func DeriveKey(version int, passphrase []byte) (key, salt []byte, err error) {
 func getVersion(version int) (c config, err error) {
 	config, ok := versions[version]
 	if !ok {
-		return config, errors.Errorf("unknown version %d", version)
+		return config, fmt.Errorf("unknown version %d", version)
 	}
 
 	return config, nil
@@ -240,7 +238,7 @@ func cipherSuite(c config) (ciphers []cipherAlg, err error) {
 	for _, a := range c.algs {
 		alg, ok := algorithms[a]
 		if !ok {
-			return nil, errors.Errorf("algorithm not found: %s", a)
+			return nil, fmt.Errorf("algorithm not found: %s", a)
 		}
 		ciphers = append(ciphers, alg)
 	}

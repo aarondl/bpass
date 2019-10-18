@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lithammer/fuzzysearch/fuzzy"
-	"github.com/pkg/errors"
 	"github.com/pquerna/otp"
 )
 
@@ -140,7 +139,7 @@ func (b Blobs) SetTwofactor(name, uriOrKey string) error {
 
 	_, err := otp.NewKeyFromURL(uri)
 	if err != nil {
-		return errors.Wrap(err, "could not set two factor key, uri wouldn't parse")
+		return fmt.Errorf("could not set two factor key, uri wouldn't parse: %w", err)
 	}
 
 	blob.addSnapshot()

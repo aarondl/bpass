@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -12,7 +13,6 @@ import (
 	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
 	"github.com/chzyer/readline"
-	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 )
 

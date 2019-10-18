@@ -2,8 +2,7 @@ package main
 
 import (
 	"crypto/rand"
-
-	"github.com/pkg/errors"
+	"errors"
 )
 
 var (

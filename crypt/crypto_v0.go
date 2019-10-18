@@ -1,13 +1,16 @@
 package crypt
 
 import (
-	"bytes"
-	"crypto/cipher"
-
-	"github.com/aarondl/bpass/pkcs7"
+	"errors"
 )
 
+// Until such time as there's a working SEED algorithm in Go, we cannot
+// implement this properly.
 func decryptV0(passphrase, encrypted []byte) (plaintext, key, salt []byte, err error) {
+	return nil, nil, nil, errors.New("not implemented")
+}
+
+/*
 	const keySize = 32 + 32 + 16 + 16
 
 	// We already know our header is taken care of because we're in here
@@ -66,3 +69,4 @@ func decryptV0(passphrase, encrypted []byte) (plaintext, key, salt []byte, err e
 
 	return ciphertext, key, salt, nil
 }
+*/

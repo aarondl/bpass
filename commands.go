@@ -13,7 +13,6 @@ import (
 
 	"github.com/atotto/clipboard"
 	"github.com/gookit/color"
-	"github.com/pkg/errors"
 )
 
 var (
@@ -658,7 +657,7 @@ func (u *uiContext) show(search string, snapshot int) error {
 
 	snaps, err := entry.NSnapshots()
 	if err != nil {
-		return errors.Wrap(err, "failed to get snapshot count")
+		return fmt.Errorf("failed to get snapshot count: %w", err)
 	}
 	if snapshot != 0 {
 		if snapshot > snaps {
