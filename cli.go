@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -69,35 +67,8 @@ func initCobra(ctx *uiContext) (*cobra.Command, error) {
 		SilenceErrors: true,
 	}
 
-	setCmd := &cobra.Command{
-		Use:           "set [flags] <name> <key> <value>",
-		Short:         "Set a key-value on an entry",
-		RunE:          cli.setHandler,
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-	getCmd := &cobra.Command{
-		Use:           "get [flags] <name> <key>",
-		Short:         "Get a value by key on an entry",
-		RunE:          cli.getHandler,
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-	showCmd := &cobra.Command{
-		Use:           "show [flags] <name>",
-		Short:         "Show an entire entry",
-		RunE:          cli.showHandler,
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-
-	for _, c := range []*cobra.Command{setCmd, getCmd, showCmd} {
-		c.Flags().UintVarP(&flagRevision, "revision", "r", 0, "Number of revisions in the past")
-	}
-
 	rootCmd.PersistentFlags().StringVarP(&flagFile, "file", "f", "passwd.blob", "Bpass file")
 	rootCmd.Flags().BoolVarP(&flagNoColor, "no-color", "", false, "Disable color output")
-	rootCmd.AddCommand(setCmd, getCmd, showCmd)
 
 	return rootCmd, nil
 }
@@ -107,19 +78,4 @@ func (c cliContext) rootHandler(cmd *cobra.Command, args []string) error {
 		ctx: c.ctx,
 	}
 	return r.run()
-}
-
-func (c cliContext) setHandler(cmd *cobra.Command, args []string) error {
-	fmt.Println("not implemented")
-	return nil
-}
-
-func (c cliContext) getHandler(cmd *cobra.Command, args []string) error {
-	fmt.Println("not implemented")
-	return nil
-}
-
-func (c cliContext) showHandler(cmd *cobra.Command, args []string) error {
-	fmt.Println("not implemented")
-	return nil
 }
