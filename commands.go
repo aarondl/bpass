@@ -133,7 +133,7 @@ func (u *uiContext) listByLabels(wantLabels []string) error {
 		b := u.store.MustFind(n)
 		haveLabels, err := b.Labels()
 		if err != nil {
-			errColor.Println("failed to retrieve labels for: %s", n)
+			errColor.Println("Failed to retrieve labels for: %s", n)
 		}
 
 		found := 0
@@ -206,7 +206,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 	case "note", blobformat.KeyNotes:
 		notes, err := entry.Notes()
 		if err != nil {
-			errColor.Println("failed to retrieve notes:", err)
+			errColor.Println("Failed to retrieve notes:", err)
 			return nil
 		}
 
@@ -214,7 +214,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		if index > 0 {
 			index--
 			if index >= len(notes) {
-				errColor.Printf("There is only %d labels", len(notes))
+				errColor.Printf("There are only %d labels", len(notes))
 				return nil
 			}
 
@@ -270,7 +270,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 	default:
 		value := entry.Get(key)
 		if len(value) == 0 {
-			errColor.Printf("key %s is not set", key)
+			errColor.Printf("Key %s is not set", key)
 			return nil
 		}
 
@@ -292,12 +292,29 @@ func (u *uiContext) set(search, key, value string) error {
 		return nil
 	}
 
+	if key == blobformat.KeyPass {
+		if len(value) == 0 {
+			var err error
+			value, err = u.getPassword()
+			if err != nil {
+				return err
+			}
+		}
+
+		if len(value) != 0 {
+			infoColor.Println("Updated password", name)
+			u.store.Set(name, key, value)
+		}
+
+		return nil
+	}
+
 	switch key {
 	case "label", blobformat.KeyLabels:
 		got := u.store.MustFind(name)
 		labels, err := got.Labels()
 		if err != nil {
-			errColor.Println("failed to retrieve labels:", err)
+			errColor.Println("Failed to retrieve labels:", err)
 			return nil
 		}
 
@@ -310,7 +327,7 @@ func (u *uiContext) set(search, key, value string) error {
 		got := u.store.MustFind(name)
 		notes, err := got.Notes()
 		if err != nil {
-			errColor.Println("failed to retrieve notes:", err)
+			errColor.Println("Failed to retrieve notes:", err)
 			return nil
 		}
 
@@ -321,13 +338,13 @@ func (u *uiContext) set(search, key, value string) error {
 			errColor.Println(err)
 			return nil
 		}
-	case blobformat.KeyUpdated:
-		errColor.Printf("%s cannot be set manually\n", blobformat.KeySnapshots)
-	case blobformat.KeySnapshots:
-		errColor.Printf("%s cannot be set manually\n", blobformat.KeySnapshots)
+	case blobformat.KeyUpdated, blobformat.KeySnapshots:
+		errColor.Printf("%s cannot be set manually\n", key)
 	default:
 		u.store.Set(name, key, value)
 	}
+
+	infoColor.Printf("set %s = %s\n", key, value)
 
 	return nil
 }
@@ -345,7 +362,7 @@ func (u *uiContext) addNoteToEntry(name string) error {
 	entry := u.store.MustFind(name)
 	notes, err := entry.Notes()
 	if err != nil {
-		errColor.Println("failed retrieving notes")
+		errColor.Println("Failed retrieving notes")
 		return nil
 	}
 
@@ -391,7 +408,7 @@ func (u *uiContext) addLabels(search string) error {
 	entry := u.store.MustFind(name)
 	labels, err := entry.Labels()
 	if err != nil {
-		errColor.Println("failed retrieving labels")
+		errColor.Println("Failed retrieving labels")
 		return nil
 	}
 
@@ -434,14 +451,14 @@ func (u *uiContext) deleteNote(search string, number int) error {
 	entry := u.store.MustFind(name)
 	notes, err := entry.Notes()
 	if err != nil {
-		errColor.Println("failed retrieving notes")
+		errColor.Println("Failed retrieving notes")
 		return nil
 	}
 
 	index := number - 1
 
 	if index >= len(notes) {
-		errColor.Printf("note number %d does not exist", number)
+		errColor.Printf("Note number %d does not exist", number)
 		return nil
 	}
 
@@ -461,7 +478,7 @@ func (u *uiContext) deleteLabel(search string, label string) error {
 	entry := u.store.MustFind(name)
 	labels, err := entry.Labels()
 	if err != nil {
-		errColor.Println("failed retrieving labels")
+		errColor.Println("Failed retrieving labels")
 		return nil
 	}
 
@@ -474,7 +491,7 @@ func (u *uiContext) deleteLabel(search string, label string) error {
 	}
 
 	if index < 0 {
-		errColor.Println("could not find that label")
+		errColor.Println("Could not find that label")
 		return nil
 	}
 
@@ -508,7 +525,7 @@ func (u *uiContext) getPassword() (string, error) {
 
 		i, err := strconv.Atoi(splits[1])
 		if err != nil {
-			fmt.Println("not an integer input")
+			fmt.Println("Not an integer input")
 			return
 		}
 		*n = i
@@ -519,7 +536,7 @@ func (u *uiContext) getPassword() (string, error) {
 	upper, lower, number, basic, extra := 0, 0, 0, 0, 0
 
 	help := func() {
-		infoColor.Println("enter a number to adjust length, a letter to toggle/use a feature\nor a letter followed by a number to ensure at least n of that type")
+		infoColor.Println("Enter a number to adjust length, a letter to toggle/use a feature\nor a letter followed by a number to ensure at least n of that type")
 		infoColor.Printf("  length: %-3d [u]pper: %-3s [l]ower: %-3s\n", length, showSetting(upper), showSetting(lower))
 		infoColor.Printf("[n]umber: %-3s [b]asic: %-3s [e]xtra: %-3s\n", showSetting(number), showSetting(basic), showSetting(extra))
 		infoColor.Println("[y] accept password, [m] manual password entry, [enter] to regen password, [?] help")
@@ -535,7 +552,7 @@ func (u *uiContext) getPassword() (string, error) {
 		if choice != "?" {
 			password, err = genPassword(length, upper, lower, number, basic, extra)
 			if err == errPasswordImpossible {
-				errColor.Println("could not generate password with these requirements")
+				errColor.Println("Could not generate password with these requirements")
 			} else if err != nil {
 				return "", err
 			}
@@ -575,7 +592,7 @@ func (u *uiContext) getPassword() (string, error) {
 		default:
 			newLen, err := strconv.Atoi(choice)
 			if err != nil {
-				fmt.Println("new length was not an integer")
+				fmt.Println("New length was not an integer")
 				continue
 			}
 			fmt.Printf("%s: %d\n", keyColor.Sprint("length"), newLen)
@@ -623,21 +640,21 @@ func (u *uiContext) show(search string, snapshot int) error {
 	showHidden(blobformat.KeyPass, entry.Get(blobformat.KeyPass), width, indent)
 	t, err := entry.TwoFactor()
 	if err != nil {
-		fmt.Println("error retrieving two factor:", err)
+		fmt.Println("Error retrieving two factor:", err)
 	} else if len(t) != 0 {
 		showKeyValue("totp", t, width, indent)
 	}
 
 	labels, err := entry.Labels()
 	if err != nil {
-		fmt.Println("error fetching labels:", err)
+		fmt.Println("Error fetching labels:", err)
 	} else if len(labels) > 0 {
 		showLabels(labels, width, indent)
 	}
 
 	notes, err := entry.Notes()
 	if err != nil {
-		fmt.Println("error retrieving notes:", err)
+		fmt.Println("Error retrieving notes:", err)
 	} else if len(notes) > 0 {
 		showNotes(notes, width, indent)
 	}
@@ -714,7 +731,7 @@ func (u *uiContext) singleName(search string) (string, bool) {
 	names := u.store.Find(search)
 	switch len(names) {
 	case 0:
-		errColor.Printf("no matches for search: %s\n", search)
+		errColor.Printf("No matches for search (%q)\n", search)
 		return "", false
 	case 1:
 		if search != names[0] {
@@ -725,9 +742,9 @@ func (u *uiContext) singleName(search string) (string, bool) {
 	}
 
 	sort.Strings(names)
-	errColor.Printf("multiple matches for search (%q):", search)
+	errColor.Printf("Multiple matches for search (%q):", search)
 	fmt.Print("\n  ")
-	fmt.Println(strings.Join(names, "  \n"))
+	fmt.Println(strings.Join(names, "\n  "))
 
 	return "", false
 }
@@ -737,17 +754,17 @@ func (u *uiContext) singleName(search string) (string, bool) {
 func validateLabel(labels []string, label string) bool {
 	for _, c := range label {
 		if unicode.IsSpace(c) {
-			errColor.Println("labels cannot contain spaces")
+			errColor.Println("Labels cannot contain spaces")
 			return false
 		} else if unicode.IsUpper(c) {
-			errColor.Println("labels cannot contain uppercase")
+			errColor.Println("Labels cannot contain uppercase")
 			return false
 		}
 	}
 
 	for _, l := range labels {
 		if l == label {
-			errColor.Println("label already applied")
+			errColor.Println("Label already applied")
 			return false
 		}
 	}

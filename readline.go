@@ -103,9 +103,9 @@ func (u *uiContext) readlineKeyComplete(s string) []string {
 }
 
 func (u *uiContext) readlineResetPrompt() {
-	u.rl.SetPrompt(promptColor.Sprintf(normalPrompt, u.shortFilename))
-}
-
-func (u *uiContext) readlineDirPrompt(dir string) {
-	u.rl.SetPrompt(promptColor.Sprintf(dirPrompt, u.shortFilename, dir))
+	if len(u.promptDir) != 0 {
+		u.rl.SetPrompt(promptColor.Sprintf(dirPrompt, u.shortFilename, u.promptDir))
+	} else {
+		u.rl.SetPrompt(promptColor.Sprintf(normalPrompt, u.shortFilename))
+	}
 }

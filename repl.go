@@ -19,7 +19,7 @@ var replHelp = `Commands:
 
 CD aware commands (omit name|search when cd'd into entry):
  show <search> [snapshot]    - Dump the entire entry (optionally at a specific snapshot)
- set  <search> <key> <value> - Set a value on an entry
+ set  <search> <key> <value> - Set a value on an entry (set pass can omit value to use generator)
  get  <search> <key> [index] - Show a specific part of an entry (notes/labels can use index)
  cp   <search> <key> [index] - Copy a specific part of an entry to the clipboard
 
@@ -89,6 +89,7 @@ func (r repl) run() error {
 			switch len(splits) {
 			case 0:
 				contextName = ""
+				r.ctx.promptDir = ""
 				r.ctx.readlineResetPrompt()
 			case 1:
 				name, ok := r.ctx.singleName(splits[0])
@@ -96,7 +97,8 @@ func (r repl) run() error {
 					continue
 				}
 				contextName = name
-				r.ctx.readlineDirPrompt(name)
+				r.ctx.promptDir = name
+				r.ctx.readlineResetPrompt()
 			default:
 				fmt.Println("cd needs an argument")
 			}
@@ -144,19 +146,61 @@ func (r repl) run() error {
 
 		case "set":
 			name := contextName
-			if len(splits) < 2 || (len(splits) < 3 && len(name) == 0) {
+			var key, value string
+			showHelpErr := false
+			doPassSet := false
+
+			switch len(splits) {
+			case 0:
+				showHelpErr = true
+			case 1:
+				// context is set, and the arg is pass
+				key = splits[0]
+				doPassSet = len(name) != 0 && key == "pass"
+				showHelpErr = !doPassSet
+			case 2:
+				// With two args we have two valid possibilities:
+				// context not set & key == "pass"
+				// set <name> "pass"
+				// context set & key, value
+				// cd <name>; set <key> <value>
+				if len(name) == 0 && splits[1] == "pass" {
+					name = splits[0]
+					key = splits[1]
+					doPassSet = true
+				} else if len(name) != 0 {
+					key, value = splits[0], splits[1]
+				} else {
+					showHelpErr = true
+				}
+			default:
+				// We have at least 3 args so we can fill name/key/value easily
+				fmt.Println(`N, K, V`)
+				if len(name) == 0 {
+					name = splits[0]
+					splits = splits[1:]
+				}
+
+				key = splits[0]
+				value = splits[1]
+				splits = splits[2:]
+			}
+
+			if showHelpErr {
 				errColor.Println("syntax: set <search> <key> <value>")
+				break
+			} else if doPassSet {
+				err = r.ctx.set(name, key, "")
+				if err == io.EOF {
+					errColor.Println("Aborted")
+					r.ctx.readlineResetPrompt()
+				} else if err != nil {
+					break
+				}
 				continue
 			}
 
-			if len(name) == 0 {
-				name = splits[0]
-				splits = splits[1:]
-			}
-
-			key := splits[0]
-			value := splits[1]
-			if len(splits) > 2 {
+			if len(splits) > 0 {
 				// This means there's extra pieces at the end, because we
 				// parsed with strings.Fields() recombining with strings.Join
 				// is lossy. In order to have a nice interface we'll find the

@@ -151,30 +151,25 @@ func (b Blobs) SetTwofactor(name, uriOrKey string) error {
 
 // SetNotes on name. Records a snapshot and sets updated.
 func (b Blobs) SetNotes(name string, notes []string) {
-	blob := b.MustFind(name)
-
-	var uglyConversion []interface{}
-	for _, s := range notes {
-		uglyConversion = append(uglyConversion, s)
-	}
-
-	blob.touchUpdated()
-	blob.B[KeyNotes] = uglyConversion
+	b.setSlice(name, KeyNotes, notes)
 }
 
-// SetLabels on name. Does not record a snapshot, but does update 'updated'.
-// This is because labels are considered part of metadata that's uninteresting
-// and isn't worth a snapshot.
+// SetLabels on name. Records a snapshot and sets updated.
 func (b Blobs) SetLabels(name string, labels []string) {
+	b.setSlice(name, KeyLabels, labels)
+}
+
+func (b Blobs) setSlice(name, key string, slice []string) {
 	blob := b.MustFind(name)
 
 	var uglyConversion []interface{}
-	for _, s := range labels {
+	for _, s := range slice {
 		uglyConversion = append(uglyConversion, s)
 	}
 
+	blob.addSnapshot()
 	blob.touchUpdated()
-	blob.B[KeyLabels] = uglyConversion
+	blob.B[key] = uglyConversion
 }
 
 // get retrieves an entire object without a copy and panics if name is not found

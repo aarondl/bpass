@@ -20,6 +20,8 @@ type uiContext struct {
 	filename      string
 	shortFilename string
 
+	promptDir string
+
 	store blobformat.Blobs
 	rl    *readline.Instance
 
