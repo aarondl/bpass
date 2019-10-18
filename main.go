@@ -8,12 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gookit/color"
-
 	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
 	"github.com/chzyer/readline"
-	"github.com/spf13/pflag"
 )
 
 type uiContext struct {
@@ -36,39 +33,15 @@ var (
 )
 
 func main() {
-	// Everything happens too late, if someone wants the version lets just
-	// give it to them immediately
-	if len(os.Args) >= 2 {
-		if os.Args[1] == "version" {
-			fmt.Println("bpass version", version)
-			return
-		}
+	parseCli()
+
+	if versionCmd.Used {
+		fmt.Println("bpass version", version)
+		return
 	}
 
+	var err error
 	ctx := new(uiContext)
-
-	rootCmd, err := initCobra(ctx)
-	if err != nil {
-		fmt.Printf("error occurred initializing ui: %+v", err)
-		os.Exit(1)
-	}
-
-	// Parse flags manually to set flagFilename early
-	// so we don't have to rely on cobra's hooks to run
-	if err = rootCmd.ParseFlags(os.Args); err != nil {
-		if err == pflag.ErrHelp {
-			// We have to parse the arguments in order to know what help
-			// we need to display here
-			rootCmd.Execute()
-			os.Exit(0)
-		}
-		fmt.Printf("error occurred: %+v\n", err)
-		os.Exit(1)
-	}
-
-	if flagNoColor {
-		color.Disable()
-	}
 
 	// setup readline needs to have the filenames parsed and ready
 	// to use from above
@@ -83,7 +56,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = rootCmd.Execute(); err != nil {
+	r := repl{ctx: ctx}
+	if err = r.run(); err != nil {
 		if err == readline.ErrInterrupt {
 			fmt.Println("exiting, did not save file")
 			os.Exit(1)
@@ -94,7 +68,7 @@ func main() {
 
 	// save the changed data
 	if err = ctx.saveBlob(); err != nil {
-		fmt.Printf("failed to load file: %+v", err)
+		fmt.Printf("failed to save file: %+v\n", err)
 		os.Exit(1)
 	}
 }
