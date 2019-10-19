@@ -12,13 +12,13 @@ import (
 )
 
 var replHelp = `Commands:
+ passwd          - Change the file's password
  add <name>      - Add a new entry
  rm  <name>      - Delete an entry
  mv  <old> <new> - Rename an entry
- ls [search]  - Search for entries, leave [search] blank to list all entries
- cd [search]  - "cd" into an entry, omit argument to return to root
-
- labels <label...> - Search entries by labels (entry must have all given labels)
+ ls  [search]    - Search for entries, leave [search] blank to list all entries
+ cd  [search]    - "cd" into an entry, omit argument to return to root
+ labels <lbl...> - Search entries by labels (entry must have all given labels)
 
 CD aware commands (omit name|search when cd'd into entry):
  show <search> [snapshot]    - Dump the entire entry (optionally at a specific snapshot)
@@ -85,6 +85,9 @@ func (r *repl) run() error {
 		splits = splits[1:]
 
 		switch cmd {
+		case "passwd":
+			err = r.ctx.passwd()
+
 		case "add":
 			if len(splits) < 1 {
 				errColor.Println("syntax: add <name>")

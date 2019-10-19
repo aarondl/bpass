@@ -63,28 +63,28 @@ func main() {
 
 	// loadBlob uses readline and the filenames to load the blob
 	if err = ctx.loadBlob(); err != nil {
-		fmt.Printf("failed to load file: %+v", err)
+		errColor.Printf("failed to open file: %+v\n", err)
 		goto Exit
 	}
 
 	if err = r.run(); err != nil {
 		if err == ErrInterrupt {
-			fmt.Println("exiting, did not save file")
+			errColor.Println("exiting, did not save file")
 			goto Exit
 		}
-		fmt.Printf("error occurred: %+v\n", err)
+		errColor.Printf("error occurred: %+v\n", err)
 		goto Exit
 	}
 
 	// save the changed data
 	if err = ctx.saveBlob(); err != nil {
-		fmt.Printf("failed to save file: %+v\n", err)
+		errColor.Printf("failed to save file: %+v\n", err)
 		goto Exit
 	}
 
 Exit:
 	if err = ctx.term.Close(); err != nil {
-		fmt.Println("failed to close terminal properly:", err)
+		errColor.Println("failed to close terminal properly:", err)
 	}
 	if err != nil {
 		os.Exit(1)
@@ -92,11 +92,6 @@ Exit:
 }
 
 func (u *uiContext) loadBlob() error {
-	pwd, err := u.term.LineHidden(fmt.Sprintf("%s password: ", u.shortFilename))
-	if err != nil {
-		return err
-	}
-
 	create := false
 
 	// Check the file exists and it's a file
@@ -111,7 +106,31 @@ func (u *uiContext) loadBlob() error {
 		return errors.New("given file name is a directory")
 	}
 
-	if !create {
+	if create {
+		infoColor.Printf("Creating new file: %s\n", u.filename)
+	}
+
+	var pwd string
+	if create {
+		pwd, err = u.term.LineHidden(inputPromptColor.Sprint("passphrase: "))
+		if err != nil {
+			return err
+		}
+
+		verify, err := u.term.LineHidden(inputPromptColor.Sprint("verify passphrase: "))
+		if err != nil {
+			return err
+		}
+
+		if pwd != verify {
+			return errors.New("passphrases did not match")
+		}
+	} else {
+		pwd, err = u.term.LineHidden(inputPromptColor.Sprintf("%s passphrase: ", u.shortFilename))
+		if err != nil {
+			return err
+		}
+
 		// Read in the file, decrypt it, parse the blob data.
 		payload, err := ioutil.ReadFile(flagFile)
 		if err != nil {

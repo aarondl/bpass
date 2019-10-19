@@ -8,6 +8,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/aarondl/bpass/crypt"
+
 	"github.com/aarondl/bpass/blobformat"
 
 	"github.com/atotto/clipboard"
@@ -21,6 +23,31 @@ var (
 	keyColor         = color.FgLightGreen
 	passColor        = color.New(color.FgBlue, color.BgBlue)
 )
+
+func (u *uiContext) passwd() error {
+	initial, err := u.term.LineHidden(inputPromptColor.Sprint("passphrase: "))
+	if err != nil {
+		return err
+	}
+
+	verify, err := u.term.LineHidden(inputPromptColor.Sprint("verify passphrase: "))
+	if err != nil {
+		return err
+	}
+
+	if initial != verify {
+		errColor.Println("passphrase did not match")
+		return nil
+	}
+
+	u.key, u.salt, err = crypt.DeriveKey(cryptVersion, []byte(initial))
+	if err != nil {
+		return err
+	}
+
+	infoColor.Println("Passphrase updated, file will be re-encrypted with it on exit")
+	return nil
+}
 
 func (u *uiContext) addNewInterruptible(name string) error {
 	err := u.addNew(name)
