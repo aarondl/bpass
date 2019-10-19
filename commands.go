@@ -8,11 +8,11 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
 
-	"github.com/aarondl/bpass/blobformat"
-
 	"github.com/atotto/clipboard"
+	uuidpkg "github.com/gofrs/uuid"
 	"github.com/gookit/color"
 )
 
@@ -109,6 +109,13 @@ func (u *uiContext) addNew(name string) error {
 	// Here we directly add things as the interface allows so that we can
 	// avoid creating useless snapshots as we create the initial blob
 	newBlob := make(map[string]interface{})
+	uuid, err := uuidpkg.NewV4()
+	if err != nil {
+		return err
+	}
+
+	newBlob[blobformat.KeyUUID] = uuid.String()
+	newBlob[blobformat.KeyName] = name
 
 	if len(user) != 0 {
 		newBlob[blobformat.KeyUser] = user
@@ -129,7 +136,7 @@ func (u *uiContext) addNew(name string) error {
 	newBlob[blobformat.KeyUpdated] = timestamp
 
 	// Save the thing
-	u.store[name] = newBlob
+	u.store[uuid.String()] = newBlob
 	return nil
 }
 
@@ -181,68 +188,37 @@ func (u *uiContext) remove(name string) error {
 }
 
 func (u *uiContext) list(search string) error {
-	names := u.store.Find(search)
-	if len(names) == 0 {
+	entries := u.store.Search(search)
+	if len(entries) == 0 {
 		fmt.Println("No entries found")
 		return nil
 	}
+	names := entries.Names()
 	sort.Strings(names)
 	fmt.Println(strings.Join(names, "\n"))
 	return nil
 }
 
 func (u *uiContext) listByLabels(wantLabels []string) error {
-	names := u.store.Find("")
-	if len(names) == 0 {
+	results := u.store.SearchLabels(wantLabels...)
+	if len(results) == 0 {
 		errColor.Println("No entries found")
 		return nil
 	}
 
-	var entries []string
-
-	for _, n := range names {
-		b := u.store.MustFind(n)
-		haveLabels, err := b.Labels()
-		if err != nil {
-			errColor.Println("Failed to retrieve labels for: %s", n)
-		}
-
-		found := 0
-		for _, w := range wantLabels {
-			for _, h := range haveLabels {
-				if h != w {
-					continue
-				}
-
-				found++
-				if found == len(wantLabels) {
-					break
-				}
-			}
-		}
-
-		if found == len(wantLabels) {
-			entries = append(entries, n)
-		}
-	}
-
-	if len(entries) == 0 {
-		errColor.Println("No entries found")
-		return nil
-	}
-
-	sort.Strings(entries)
-	fmt.Println(strings.Join(entries, "\n"))
+	names := results.Names()
+	sort.Strings(names)
+	fmt.Println(strings.Join(names, "\n"))
 	return nil
 }
 
 func (u *uiContext) get(search, key string, index int, copy bool) error {
-	name, ok := u.singleName(search)
+	uuid, ok := u.singleName(search)
 	if !ok {
 		return nil
 	}
 
-	entry := u.store.MustFind(name)
+	entry := u.store.Get(uuid)
 
 	switch key {
 	case "label", blobformat.KeyLabels:
@@ -312,7 +288,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		}
 
 		if len(val) == 0 {
-			errColor.Println("twofactor is not set for", name)
+			errColor.Println("twofactor is not set for", entry.Name())
 		}
 
 		if copy {
@@ -341,7 +317,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 	default:
 		value := entry.Get(key)
 		if len(value) == 0 {
-			errColor.Printf("Key %s is not set", key)
+			errColor.Printf("Key %s is not set\n", key)
 			return nil
 		}
 
@@ -358,10 +334,12 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 }
 
 func (u *uiContext) set(search, key, value string) error {
-	name, ok := u.singleName(search)
+	uuid, ok := u.singleName(search)
 	if !ok {
 		return nil
 	}
+
+	entry := u.store.Get(uuid)
 
 	if key == blobformat.KeyPass {
 		if len(value) == 0 {
@@ -373,8 +351,8 @@ func (u *uiContext) set(search, key, value string) error {
 		}
 
 		if len(value) != 0 {
-			infoColor.Println("Updated password", name)
-			u.store.Set(name, key, value)
+			infoColor.Println("Updated password for", entry.Name())
+			u.store.Set(uuid, key, value)
 		}
 
 		return nil
@@ -382,8 +360,7 @@ func (u *uiContext) set(search, key, value string) error {
 
 	switch key {
 	case "label", blobformat.KeyLabels:
-		got := u.store.MustFind(name)
-		labels, err := got.Labels()
+		labels, err := entry.Labels()
 		if err != nil {
 			errColor.Println("Failed to retrieve labels:", err)
 			return nil
@@ -393,26 +370,25 @@ func (u *uiContext) set(search, key, value string) error {
 			return nil
 		}
 		labels = append(labels, value)
-		u.store.SetLabels(name, labels)
+		u.store.SetLabels(uuid, labels)
 	case "note", blobformat.KeyNotes:
-		got := u.store.MustFind(name)
-		notes, err := got.Notes()
+		notes, err := entry.Notes()
 		if err != nil {
 			errColor.Println("Failed to retrieve notes:", err)
 			return nil
 		}
 
 		notes = append(notes, value)
-		u.store.SetNotes(name, notes)
+		u.store.SetNotes(uuid, notes)
 	case "totp", blobformat.KeyTwoFactor:
-		if err := u.store.SetTwofactor(name, value); err != nil {
+		if err := u.store.SetTwofactor(uuid, value); err != nil {
 			errColor.Println(err)
 			return nil
 		}
 	case blobformat.KeyUpdated, blobformat.KeySnapshots:
 		errColor.Printf("%s cannot be set manually\n", key)
 	default:
-		u.store.Set(name, key, value)
+		u.store.Set(uuid, key, value)
 	}
 
 	infoColor.Printf("set %s = %s\n", key, value)
@@ -421,16 +397,17 @@ func (u *uiContext) set(search, key, value string) error {
 }
 
 func (u *uiContext) addNote(search string) error {
-	name, ok := u.singleName(search)
+	uuid, ok := u.singleName(search)
 	if !ok {
 		return nil
 	}
 
-	return u.addNoteToEntry(name)
+	return u.addNoteToEntry(uuid)
 }
 
-func (u *uiContext) addNoteToEntry(name string) error {
-	entry := u.store.MustFind(name)
+func (u *uiContext) addNoteToEntry(uuid string) error {
+	entry := u.store.Get(uuid)
+
 	notes, err := entry.Notes()
 	if err != nil {
 		errColor.Println("Failed retrieving notes")
@@ -465,17 +442,18 @@ func (u *uiContext) addNoteToEntry(name string) error {
 	}
 
 	notes = append(notes, strings.Join(lines, "\n"))
-	u.store.SetNotes(name, notes)
+	u.store.SetNotes(uuid, notes)
+	infoColor.Println("Updated notes for", entry.Name())
 
 	return nil
 }
 
 func (u *uiContext) addLabels(search string) error {
-	name, ok := u.singleName(search)
+	uuid, ok := u.singleName(search)
 	if !ok {
 		return nil
 	}
-	entry := u.store.MustFind(name)
+	entry := u.store.Get(uuid)
 	labels, err := entry.Labels()
 	if err != nil {
 		errColor.Println("Failed retrieving labels")
@@ -505,19 +483,19 @@ func (u *uiContext) addLabels(search string) error {
 	}
 
 	if changed {
-		u.store.SetLabels(name, labels)
+		infoColor.Println("Updated labels for", entry.Name())
+		u.store.SetLabels(uuid, labels)
 	}
-
 	return nil
 }
 
 func (u *uiContext) deleteNote(search string, number int) error {
-	name, ok := u.singleName(search)
+	uuid, ok := u.singleName(search)
 	if !ok {
 		return nil
 	}
 
-	entry := u.store.MustFind(name)
+	entry := u.store.Get(uuid)
 	notes, err := entry.Notes()
 	if err != nil {
 		errColor.Println("Failed retrieving notes")
@@ -533,18 +511,19 @@ func (u *uiContext) deleteNote(search string, number int) error {
 
 	notes[index], notes[len(notes)-1] = notes[len(notes)-1], notes[index]
 	notes = notes[:len(notes)-1]
-	u.store.SetNotes(name, notes)
+	u.store.SetNotes(uuid, notes)
+	infoColor.Println("Updated notes for", entry.Name())
 
 	return nil
 }
 
 func (u *uiContext) deleteLabel(search string, label string) error {
-	name, ok := u.singleName(search)
+	uuid, ok := u.singleName(search)
 	if !ok {
 		return nil
 	}
 
-	entry := u.store.MustFind(name)
+	entry := u.store.Get(uuid)
 	labels, err := entry.Labels()
 	if err != nil {
 		errColor.Println("Failed retrieving labels")
@@ -566,7 +545,8 @@ func (u *uiContext) deleteLabel(search string, label string) error {
 
 	labels[index], labels[len(labels)-1] = labels[len(labels)-1], labels[index]
 	labels = labels[:len(labels)-1]
-	u.store.SetLabels(name, labels)
+	u.store.SetLabels(uuid, labels)
+	infoColor.Println("Updated labels for", entry.Name())
 	return nil
 }
 
@@ -671,11 +651,11 @@ func (u *uiContext) getPassword() (string, error) {
 }
 
 func (u *uiContext) show(search string, snapshot int) error {
-	name, ok := u.singleName(search)
+	uuid, ok := u.singleName(search)
 	if !ok {
 		return nil
 	}
-	entry := u.store.MustFind(name)
+	entry := u.store.Get(uuid)
 
 	snaps, err := entry.NSnapshots()
 	if err != nil {
@@ -683,7 +663,7 @@ func (u *uiContext) show(search string, snapshot int) error {
 	}
 	if snapshot != 0 {
 		if snapshot > snaps {
-			errColor.Printf("%s only has %d snapshots\n", name, snaps)
+			errColor.Printf("%s only has %d snapshots\n", entry.Name(), snaps)
 			return nil
 		}
 
@@ -795,19 +775,23 @@ func (u *uiContext) prompt(prompt string) (string, error) {
 
 // singleName returns false iff it printed an error message to the user
 func (u *uiContext) singleName(search string) (string, bool) {
-	names := u.store.Find(search)
-	switch len(names) {
+	entries := u.store.Search(search)
+	switch len(entries) {
 	case 0:
 		errColor.Printf("No matches for search (%q)\n", search)
 		return "", false
 	case 1:
-		if search != names[0] {
-			infoColor.Printf("using: %s\n", names[0])
+		ids := entries.UUIDs()
+		id := ids[0]
+		name := entries[id]
+		if search != name {
+			infoColor.Printf("using: %s\n", name)
 		}
 
-		return names[0], true
+		return id, true
 	}
 
+	names := entries.Names()
 	sort.Strings(names)
 	errColor.Printf("Multiple matches for search (%q):", search)
 	fmt.Print("\n  ")

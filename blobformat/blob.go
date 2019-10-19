@@ -11,14 +11,11 @@ import (
 )
 
 // Blob is a context of a single blob
-type Blob struct {
-	Name string
-	B    map[string]interface{}
-}
+type Blob map[string]interface{}
 
 // Keys returns all the keys known about
 func (b Blob) Keys() (keys []string) {
-	for k := range b.B {
+	for k := range b {
 		keys = append(keys, k)
 	}
 	return keys
@@ -26,7 +23,7 @@ func (b Blob) Keys() (keys []string) {
 
 // ArbitraryKeys returns all keys that are unknown to this package
 func (b Blob) ArbitraryKeys() (keys []string) {
-	for k := range b.B {
+	for k := range b {
 		found := false
 		for _, search := range knownKeys {
 			if search == k {
@@ -43,6 +40,29 @@ func (b Blob) ArbitraryKeys() (keys []string) {
 	return keys
 }
 
+// Name returns the name of the blob
+func (b Blob) Name() string {
+	name, ok := b[KeyName]
+	if !ok {
+		panic("name was not set")
+	}
+
+	return name.(string)
+}
+
+// Deleted checks if the blob is deleted
+func (b Blob) Deleted() bool {
+	_, ok := b[KeyDeleted]
+	return ok
+}
+
+// Delete soft-deletes the item
+func (b Blob) Delete() {
+	b.snapshot()
+	b.touchUpdated()
+	b[KeyDeleted] = time.Now().Unix()
+}
+
 // Get a specific value. Panics if name is not found. Special keys require the
 // use of specific getters: labels, notes, twofactor, updated etc.
 func (b Blob) Get(key string) string {
@@ -53,7 +73,7 @@ func (b Blob) Get(key string) string {
 		}
 	}
 
-	intf, ok := b.B[key]
+	intf, ok := b[key]
 	if !ok {
 		return ""
 	}
@@ -68,7 +88,7 @@ func (b Blob) Get(key string) string {
 //
 // This uses the TOTP algorithm (Google-Authenticator like).
 func (b Blob) TwoFactor() (string, error) {
-	twoFactorURIIntf := b.B[KeyTwoFactor]
+	twoFactorURIIntf := b[KeyTwoFactor]
 
 	if twoFactorURIIntf == nil {
 		return "", nil
@@ -77,12 +97,12 @@ func (b Blob) TwoFactor() (string, error) {
 	twoFactorURI := twoFactorURIIntf.(string)
 	key, err := otp.NewKeyFromURL(twoFactorURI)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse two factor uri for %s: %w", b.Name, err)
+		return "", fmt.Errorf("failed to parse two factor uri for %s: %w", b.Name(), err)
 	}
 
 	// There's no constant for totp here
 	if key.Type() != "totp" {
-		return "", fmt.Errorf("two factor key for %s was not a totp key", b.Name)
+		return "", fmt.Errorf("two factor key for %s was not a totp key", b.Name())
 	}
 
 	code, err := totp.GenerateCode(key.Secret(), time.Now().UTC())
@@ -104,20 +124,20 @@ func (b Blob) Labels() (labels []string, err error) {
 }
 
 func (b Blob) getSlice(keyname string) (out []string, err error) {
-	intf := b.B[keyname]
+	intf := b[keyname]
 	if intf == nil {
 		return nil, nil
 	}
 
 	intfSlice, ok := intf.([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("%s for %s is not in the right format", keyname, b.Name)
+		return nil, fmt.Errorf("%s for %s is not in the right format", keyname, b.Name())
 	}
 
 	for i, intf := range intfSlice {
 		s, ok := intf.(string)
 		if !ok {
-			return nil, fmt.Errorf("%s[%d] for %s is not in the right format", keyname, i, b.Name)
+			return nil, fmt.Errorf("%s[%d] for %s is not in the right format", keyname, i, b.Name())
 		}
 
 		out = append(out, s)
@@ -128,7 +148,7 @@ func (b Blob) getSlice(keyname string) (out []string, err error) {
 
 // Updated timestamp, if not set or invalid will be the zero value for time
 func (b Blob) Updated() time.Time {
-	updatedIntf := b.B[KeyUpdated]
+	updatedIntf := b[KeyUpdated]
 	if updatedIntf == nil {
 		return time.Time{}
 	}
@@ -160,40 +180,40 @@ func (b Blob) Updated() time.Time {
 // Returns an error if there are no snapshots, if index is out of range
 // or if snapshots is in the wrong format.
 func (b Blob) Snapshot(index int) (snapBlob Blob, err error) {
-	snapsIntf := b.B[KeySnapshots]
+	snapsIntf := b[KeySnapshots]
 	if snapsIntf == nil {
-		return snapBlob, fmt.Errorf("snapshot called on %s which has no snapshots", b.Name)
+		return snapBlob, fmt.Errorf("snapshot called on %s which has no snapshots", b.Name())
 	}
 
 	snaps, ok := snapsIntf.([]interface{})
 	if !ok {
-		return snapBlob, fmt.Errorf("snapshots for %s are stored in the wrong format", b.Name)
+		return snapBlob, fmt.Errorf("snapshots for %s are stored in the wrong format", b.Name())
 	}
 
 	if index < 0 || index > len(snaps) {
-		return snapBlob, fmt.Errorf("%s has %d snapshot entries but given index: %d", b.Name, len(snaps), index)
+		return snapBlob, fmt.Errorf("%s has %d snapshot entries but given index: %d", b.Name(), len(snaps), index)
 	}
 
 	index = len(snaps) - index
 	snap, ok := snaps[index].(map[string]interface{})
 	if !ok {
-		return snapBlob, fmt.Errorf("snapshot %d is stored in the wrong format for: %s", index, b.Name)
+		return snapBlob, fmt.Errorf("snapshot %d is stored in the wrong format for: %s", index, b.Name())
 	}
 
-	return Blob{B: snap, Name: b.Name + fmt.Sprintf(":snap%d", index)}, nil
+	return snap, nil
 }
 
 // NSnapshots returns the number of snapshots saved for the blob. Panics if name
 // is not found or snapshots is not an array of objects.
 func (b Blob) NSnapshots() (int, error) {
-	snapsIntf := b.B[KeySnapshots]
+	snapsIntf := b[KeySnapshots]
 	if snapsIntf == nil {
 		return 0, nil
 	}
 
 	snaps, ok := snapsIntf.([]interface{})
 	if !ok {
-		return 0, fmt.Errorf("snapshots are stored in the wrong format for %s" + b.Name)
+		return 0, fmt.Errorf("snapshots are stored in the wrong format for %s" + b.Name())
 	}
 
 	return len(snaps), nil
@@ -201,15 +221,14 @@ func (b Blob) NSnapshots() (int, error) {
 
 // touchUpdated refreshes the updated timestamp
 func (b Blob) touchUpdated() {
-	now := time.Now().Unix()
-	b.B[KeyUpdated] = now
+	b[KeyUpdated] = time.Now().Unix()
 }
 
 // addSnapshot adds a new snapshot containing all the current values into
 // the blob's snapshot list
 func (b Blob) addSnapshot() {
 	var snaps []interface{}
-	snapsIntf, ok := b.B[KeySnapshots]
+	snapsIntf, ok := b[KeySnapshots]
 	if !ok {
 		snaps = make([]interface{}, 0, 1)
 	} else {
@@ -217,7 +236,7 @@ func (b Blob) addSnapshot() {
 	}
 
 	snaps = append(snaps, b.snapshot())
-	b.B[KeySnapshots] = snaps
+	b[KeySnapshots] = snaps
 }
 
 // snapshot creates a deep copy of a map[string]interface{} excluding the
@@ -225,8 +244,8 @@ func (b Blob) addSnapshot() {
 //
 // The only types that are copied here are string, []string, int64/float64
 func (b Blob) snapshot() map[string]interface{} {
-	clone := make(map[string]interface{}, len(b.B))
-	for k, v := range b.B {
+	clone := make(map[string]interface{}, len(b))
+	for k, v := range b {
 		// Do not include snapshots in the new snapshot
 		if k == KeySnapshots {
 			continue

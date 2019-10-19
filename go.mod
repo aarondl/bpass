@@ -9,6 +9,7 @@ require (
 	github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/enceve/crypto v0.0.0-20160707101852-34d48bb93815
+	github.com/gofrs/uuid v3.2.0+incompatible
 	github.com/gookit/color v1.2.0
 	github.com/integrii/flaggy v1.2.2
 	github.com/lithammer/fuzzysearch v1.0.2
