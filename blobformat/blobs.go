@@ -170,11 +170,12 @@ func (b Blobs) allEntries() (entries SearchResults) {
 	}
 
 	entries = make(map[string]string)
-	for _, blobIntf := range b {
+	for uuid, blobIntf := range b {
 		blob := Blob(blobIntf.(map[string]interface{}))
 		if blob.Deleted() {
 			continue
 		}
+		entries[uuid] = blob.Name()
 	}
 	return entries
 }

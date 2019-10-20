@@ -63,10 +63,12 @@ func (u *uiContext) addNewInterruptible(name string) error {
 }
 
 func (u *uiContext) addNew(name string) error {
-	_, exist := u.store[name]
-	if exist {
-		errColor.Printf("%q already exists\n", name)
-		return nil
+	for _, v := range u.store {
+		blob := blobformat.Blob(v.(map[string]interface{}))
+		if strings.EqualFold(name, blob.Name()) {
+			errColor.Printf("%q already exists\n", name)
+			return nil
+		}
 	}
 
 	user, err := u.prompt(inputPromptColor.Sprint("user: "))
@@ -591,13 +593,12 @@ func (u *uiContext) getPassword() (string, error) {
 		infoColor.Println("[y] accept password, [m] manual password entry, [enter] to regen password, [?] help")
 		fmt.Println()
 	}
+	help()
 
 	var err error
 	var choice, password string
 	passwordColor := color.FgLightRed
 	for {
-		help()
-
 		if choice != "?" {
 			password, err = genPassword(length, upper, lower, number, basic, extra)
 			if err == errPasswordImpossible {
@@ -627,7 +628,7 @@ func (u *uiContext) getPassword() (string, error) {
 			b, err := u.term.LineHidden(inputPromptColor.Sprint("enter new password: "))
 			return string(b), err
 		case choice == "?":
-			// Do nothing, and don't regen
+			help()
 		case splits[0] == "u":
 			setSetting("uppercase", splits, &upper)
 		case splits[0] == "l":
