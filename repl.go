@@ -25,6 +25,7 @@ CD aware commands (omit name|search when cd'd into entry):
  set  <search> <key> <value> - Set a value on an entry (set pass can omit value to use generator)
  get  <search> <key> [index] - Show a specific part of an entry (notes/labels can use index)
  cp   <search> <key> [index] - Copy a specific part of an entry to the clipboard
+ open <search>               - Open url key using the browser (linux only atm, xdg-open shell out)
 
  note    <search>            - Add a note
  rmnote  <search> <index>    - Delete a note
@@ -210,7 +211,6 @@ func (r *repl) run() error {
 				}
 			default:
 				// We have at least 3 args so we can fill name/key/value easily
-				fmt.Println(`N, K, V`)
 				if len(name) == 0 {
 					name = splits[0]
 					splits = splits[1:]
@@ -253,6 +253,18 @@ func (r *repl) run() error {
 			}
 
 			err = r.ctx.set(name, key, value)
+
+		case "open":
+			name := r.ctxEntry
+			if len(name) == 0 {
+				if len(splits) == 0 {
+					errColor.Println("syntax: open <search>")
+					continue
+				}
+				name = splits[0]
+			}
+
+			err = r.ctx.openurl(name)
 
 		case "note":
 			name := r.ctxEntry
