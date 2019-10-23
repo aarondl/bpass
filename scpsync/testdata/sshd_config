@@ -1,0 +1,24 @@
+# sshd -D -4 -e -f sshd_config -h host.key
+
+AcceptEnv LANG LC_*
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+AllowTcpForwarding no
+ChallengeResponseAuthentication no
+Ciphers aes256-gcm@openssh.com,aes256-ctr
+DebianBanner no
+DisableForwarding yes
+FingerprintHash sha256
+HostbasedAcceptedKeyTypes ssh-ed25519,ssh-rsa
+HostKeyAlgorithms ssh-ed25519,ssh-rsa
+IgnoreUserKnownHosts yes
+KexAlgorithms curve25519-sha256,curve25519-sha256@libssh.org
+ListenAddress 127.0.0.1:22222
+MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,hmac-sha2-512,hmac-sha2-256
+PermitEmptyPasswords no
+PermitRootLogin no
+PermitTunnel no
+PubkeyAcceptedKeyTypes ssh-ed25519,ssh-rsa
+PrintMotd no
+UsePAM no
+X11Forwarding no
