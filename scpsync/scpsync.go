@@ -49,7 +49,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -64,19 +63,28 @@ type readWriter struct {
 
 // Recv connects to host:port via tcp with a given client configuration
 // and uses scp to download the file contents from the remote host.
-func Recv(hostport string, config *ssh.ClientConfig, filename string) ([]byte, error) {
+func Recv(hostport string, config *ssh.ClientConfig, filename string) (content []byte, err error) {
 	client, err := ssh.Dial("tcp", hostport, config)
 	if err != nil {
 		return nil, err
 	}
 
+	// Make sure we close the client connection
+	defer func() {
+		closeErr := client.Close()
+		if closeErr != nil {
+			if err != nil {
+				err = fmt.Errorf("%w, and failed to close ssh connection: %w", err, closeErr)
+			} else {
+				err = fmt.Errorf("failed to close ssh connection: %w", closeErr)
+			}
+		}
+	}()
+
 	session, err := client.NewSession()
 	if err != nil {
 		return nil, err
 	}
-
-	stderr := new(bytes.Buffer)
-	session.Stderr = stderr
 
 	write, err := session.StdinPipe()
 	if err != nil {
@@ -94,53 +102,49 @@ func Recv(hostport string, config *ssh.ClientConfig, filename string) ([]byte, e
 	}
 
 	var file scpFile
-	waiter := make(chan struct{})
-	go func() {
-		file, err = readFile(stream)
-		if err != nil {
-			return
-		}
-
-		if err = write.Close(); err != nil {
-			return
-		}
-
-		close(waiter)
-	}()
-
-	<-waiter
-
-	// The goroutine can produce an error like this
+	file, err = readFile(stream)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	if err = write.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close write stream: %w", err)
 	}
 
 	if err = session.Wait(); err != nil {
 		return nil, fmt.Errorf("failed to wait for scp: %w", err)
 	}
-	if err = client.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close ssh connection: %w", err)
-	}
 
-	return file.Contents, err
+	// Set this so the defer can nil it
+	content = file.Contents
+	return content, err
 }
 
 // Send connects to host:port via tcp with a given client configuration
 // and uses scp to write the file contents to the remote host to 'filename' with
 // the given mode. As per SCP semantics, the mode is ignored if the file exists.
-func Send(hostport string, config *ssh.ClientConfig, filename string, mode int, contents []byte) error {
+func Send(hostport string, config *ssh.ClientConfig, filename string, mode int, contents []byte) (err error) {
 	client, err := ssh.Dial("tcp", hostport, config)
 	if err != nil {
 		return err
 	}
 
+	// Make sure we close the client connection
+	defer func() {
+		closeErr := client.Close()
+		if closeErr != nil {
+			if err != nil {
+				err = fmt.Errorf("%w, and failed to close ssh connection: %w", err, closeErr)
+			} else {
+				err = fmt.Errorf("failed to close ssh connection: %w", closeErr)
+			}
+		}
+	}()
+
 	session, err := client.NewSession()
 	if err != nil {
 		return err
 	}
-
-	stderr := new(bytes.Buffer)
-	session.Stderr = stderr
 
 	write, err := session.StdinPipe()
 	if err != nil {
@@ -151,36 +155,25 @@ func Send(hostport string, config *ssh.ClientConfig, filename string, mode int, 
 		return err
 	}
 
-	stream := readWriter{Reader: io.TeeReader(read, os.Stdout), Writer: write}
-
+	stream := readWriter{Reader: read, Writer: write}
 	if err = session.Start("scp -qt " + filename); err != nil {
 		return err
 	}
 
-	waiter := make(chan struct{})
-	go func() {
-		err = sendFile(stream,
-			bytes.NewReader(contents), filename, int64(len(contents)), mode)
-		if err != nil {
-			return
-		}
+	err = sendFile(stream, bytes.NewReader(contents), filename, int64(len(contents)), mode)
+	if err != nil {
+		return
+	}
 
-		if err = write.Close(); err != nil {
-			return
-		}
-
-		close(waiter)
-	}()
-
-	<-waiter
+	if err = write.Close(); err != nil {
+		return
+	}
 
 	if err = session.Wait(); err != nil {
 		return fmt.Errorf("failed to wait for scp: %w", err)
 	}
-	if err = client.Close(); err != nil {
-		return fmt.Errorf("failed to close ssh connection: %w", err)
-	}
 
+	// Always return err so defer can change it if it's nil
 	return err
 }
 
