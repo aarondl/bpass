@@ -226,7 +226,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		if index > 0 {
 			index--
 			if index >= len(labels) {
-				errColor.Printf("There is only %d labels", len(labels))
+				errColor.Printf("There is only %d labels\n", len(labels))
 				return nil
 			}
 
@@ -255,7 +255,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		if index > 0 {
 			index--
 			if index >= len(notes) {
-				errColor.Printf("There are only %d labels", len(notes))
+				errColor.Printf("There are only %d notes\n", len(notes))
 				return nil
 			}
 
@@ -501,7 +501,7 @@ func (u *uiContext) deleteNote(search string, number int) error {
 	index := number - 1
 
 	if index >= len(notes) {
-		errColor.Printf("Note number %d does not exist", number)
+		errColor.Printf("Note number %d does not exist\n", number)
 		return nil
 	}
 

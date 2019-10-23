@@ -58,7 +58,7 @@ func main() {
 	// setup readline needs to have the filenames parsed and ready
 	// to use from above
 	if err = setupLineEditor(ctx); err != nil {
-		fmt.Printf("failed to setup line editor: %+v", err)
+		fmt.Printf("failed to setup line editor: %+v\n", err)
 		goto Exit
 	}
 

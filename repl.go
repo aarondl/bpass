@@ -147,7 +147,7 @@ func (r *repl) run() error {
 		case "cp", "get":
 			name := r.ctxEntry
 			if len(splits) < 1 || (len(splits) < 2 && len(name) == 0) {
-				errColor.Printf("syntax: %s <search> <key> [index]", cmd)
+				errColor.Printf("syntax: %s <search> <key> [index]\n", cmd)
 				continue
 			}
 
@@ -174,7 +174,7 @@ func (r *repl) run() error {
 		case "totp", blobformat.KeyUser, blobformat.KeyPass, blobformat.KeyEmail:
 			name := r.ctxEntry
 			if len(splits) < 1 && len(name) == 0 {
-				errColor.Printf("syntax: %s <search>", cmd)
+				errColor.Printf("syntax: %s <search>\n", cmd)
 				continue
 			}
 
@@ -297,7 +297,7 @@ func (r *repl) run() error {
 
 			number, err := strconv.Atoi(splits[0])
 			if err != nil {
-				errColor.Printf("%q is not a number", splits[0])
+				errColor.Printf("%q is not a number\n", splits[0])
 				continue
 			}
 
