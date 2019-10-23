@@ -3,6 +3,7 @@ package blobformat
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -12,6 +13,11 @@ import (
 	uuidpkg "github.com/gofrs/uuid"
 	"github.com/lithammer/fuzzysearch/fuzzy"
 	"github.com/pquerna/otp"
+)
+
+// Sentinel errors
+var (
+	ErrNameNotUnique = errors.New("name is not unique")
 )
 
 // Blobs exposes operations on special keys in the blob file structure
@@ -133,6 +139,7 @@ func (b Blobs) SearchLabels(labels ...string) (entries SearchResults) {
 		return b.allEntries()
 	}
 
+	entries = make(map[string]string)
 	for uuid, blobIntf := range b {
 		blob := Blob(blobIntf.(map[string]interface{}))
 
@@ -162,6 +169,19 @@ func (b Blobs) SearchLabels(labels ...string) (entries SearchResults) {
 	}
 
 	return entries
+}
+
+// Find a particular blob by name. Returns "", nil if it does not find the
+// object searched for.
+func (b Blobs) Find(name string) (string, Blob) {
+	for uuid, blobIntf := range b {
+		blob := Blob(blobIntf.(map[string]interface{}))
+		if blob.Name() == name {
+			return uuid, blob
+		}
+	}
+
+	return "", nil
 }
 
 func (b Blobs) allEntries() (entries SearchResults) {
@@ -221,16 +241,77 @@ func (b Blobs) Get(uuid string) Blob {
 	return mpintf
 }
 
-// New creates a new entry
-func (b Blobs) New(name string) (uuid string) {
-	uuid = uuidpkg.Must(uuidpkg.NewV4()).String()
+// New creates a new entry with, it will return ErrNameNotUnique if the name
+// is not unique. The entry is not immediately inserted but instead returned
+// so things may be added to it before its stored with the Add function.
+func (b Blobs) New(name string) (Blob, error) {
+	for _, blobIntf := range b {
+		blob := Blob(blobIntf.(map[string]interface{}))
+		if name == blob.Name() {
+			return nil, ErrNameNotUnique
+		}
+	}
+
+	uuidObj, err := uuidpkg.NewV4()
+	if err != nil {
+		return nil, err
+	}
+	uuid := uuidObj.String()
+
 	blob := Blob{
 		KeyUUID:    uuid,
 		KeyName:    name,
 		KeyUpdated: time.Now().Unix(),
 	}
-	b[uuid] = blob
-	return uuid
+	return blob, nil
+}
+
+// Add will error if name/uuid is not set, or if either of them are not unique
+func (b Blobs) Add(blob Blob) error {
+	uuid := blob.Get(KeyUUID)
+	name := blob.Get(KeyName)
+
+	if len(uuid) == 0 {
+		return errors.New("uuid cannot be empty")
+	}
+	if len(name) == 0 {
+		return errors.New("name cannot be empty")
+	}
+
+	_, ok := b[uuid]
+	if ok {
+		return errors.New("uuid is not unique")
+	}
+
+	for _, blobIntf := range b {
+		searchBlob := Blob(blobIntf.(map[string]interface{}))
+		if name == searchBlob.Name() {
+			return ErrNameNotUnique
+		}
+	}
+
+	b[uuid] = map[string]interface{}(blob)
+	return nil
+}
+
+// Rename a specific UUID to a new name, returns ErrNameNotUnique if not
+// possible
+func (b Blobs) Rename(srcUUID, dstName string) error {
+	hasUUID, _ := b.Find(dstName)
+	if len(hasUUID) != 0 {
+		return ErrNameNotUnique
+	}
+
+	blobIntf, ok := b[srcUUID]
+	if !ok {
+		return errors.New("uuid not found")
+	}
+
+	blob := Blob(blobIntf.(map[string]interface{}))
+	blob.addSnapshot()
+	blob.touchUpdated()
+	blob[KeyName] = dstName
+	return nil
 }
 
 // Set the key in name to value, properly updates 'updated' and 'snapshots'.
@@ -294,6 +375,93 @@ func (b Blobs) SetNotes(uuid string, notes []string) {
 // SetLabels on name. Records a snapshot and sets updated.
 func (b Blobs) SetLabels(uuid string, labels []string) {
 	b.setSlice(uuid, KeyLabels, labels)
+}
+
+// NewSync creates a new blob with a unique name to have values set on it before
+// calling Add() to add it to the store.
+//
+// AddSync can be called afterwards to add it to the list of automatic syncs
+// in the master
+func (b Blobs) NewSync(kind string) (Blob, error) {
+	// Find a unique name
+	newName := syncPrefix + kind
+	var blob Blob
+	var err error
+	for {
+		blob, err = b.New(newName)
+		if err == nil {
+			break
+		} else if err != ErrNameNotUnique {
+			return nil, err
+		}
+
+		newName += "1"
+	}
+
+	return blob, nil
+}
+
+// AddSync adds a uuid to the sync master list
+func (b Blobs) AddSync(uuid string) error {
+	masterUUID, blob := b.Find(syncMaster)
+	if len(masterUUID) == 0 {
+		// We have to create a new one
+		blob, err := b.New(syncMaster)
+		if err != nil {
+			return err
+		}
+		blob[KeySync] = []interface{}{uuid}
+		return b.Add(blob)
+	}
+
+	// If there's no KeySync just add it and go away
+	syncsIntf := blob[KeySync]
+	if syncsIntf == nil {
+		blob[KeySync] = []interface{}{uuid}
+		return nil
+	}
+
+	// Don't use helpers to avoid snapshotting
+	syncs := syncsIntf.([]interface{})
+	syncs = append(syncs, uuid)
+	blob[KeySync] = syncs
+
+	return nil
+}
+
+// RemoveSync removes a synchronization key from the list of master syncs.
+// Returns true if it actually found something to remove
+func (b Blobs) RemoveSync(uuid string) (bool, error) {
+	masterUUID, blob := b.Find(syncMaster)
+	if len(masterUUID) == 0 {
+		// There is no master, we have nothing to remove
+		return false, nil
+	}
+
+	syncsIntf := blob[KeySync]
+	if syncsIntf == nil {
+		return false, nil
+	}
+
+	syncs, ok := syncsIntf.([]interface{})
+	if !ok {
+		return false, fmt.Errorf("sync list was not the correct type: %T", syncsIntf)
+	}
+	for i, s := range syncs {
+		str, ok := s.(string)
+		if !ok {
+			return false, fmt.Errorf("sync list item was not the correct type: %T", s)
+		}
+
+		if str == uuid {
+			syncs[len(syncs)-1], syncs[i] = syncs[i], syncs[len(syncs)-1]
+			syncs = syncs[:len(syncs)-1]
+			blob[KeySync] = syncs
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func (b Blobs) setSlice(uuid, key string, slice []string) {

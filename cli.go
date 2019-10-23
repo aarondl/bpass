@@ -7,10 +7,11 @@ import (
 )
 
 var (
-	flagHelp     bool
-	flagNoColor  bool
-	flagRevision uint
-	flagFile     string = "passwd.blob"
+	flagHelp        bool
+	flagNoColor     bool
+	flagRevision    uint
+	flagNoClearClip bool
+	flagFile        string = "passwd.blob"
 )
 
 var (
@@ -43,8 +44,9 @@ Flags:
 func parseCli() {
 	parser := flaggy.NewParser("bpass")
 	parser.Bool(&flagNoColor, "", "no-color", "Turn off color output")
-	parser.String(&flagFile, "f", "file", "The file to open")
+	parser.Bool(&flagNoClearClip, "", "no-clear-clip", "Do not clear clipboard on exit")
 	parser.Bool(&flagHelp, "h", "help", "Show help")
+	parser.String(&flagFile, "f", "file", "The file to open")
 
 	parser.ShowHelpWithHFlag = false
 	parser.ShowHelpOnUnexpected = false

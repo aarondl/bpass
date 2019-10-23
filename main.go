@@ -10,6 +10,7 @@ import (
 
 	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
+	"github.com/atotto/clipboard"
 
 	"github.com/gookit/color"
 )
@@ -83,6 +84,12 @@ func main() {
 	}
 
 Exit:
+	if !flagNoClearClip {
+		if err = clipboard.WriteAll(""); err != nil {
+			errColor.Println("failed to clear the clipboard")
+		}
+	}
+
 	if err = ctx.term.Close(); err != nil {
 		errColor.Println("failed to close terminal properly:", err)
 	}

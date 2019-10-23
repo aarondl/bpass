@@ -7,7 +7,7 @@ require (
 	github.com/chzyer/logex v1.1.10 // indirect
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/chzyer/test v0.0.0-20180213035817-a1ea475d72b1 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/davecgh/go-spew v1.1.1
 	github.com/enceve/crypto v0.0.0-20160707101852-34d48bb93815
 	github.com/gofrs/uuid v3.2.0+incompatible
 	github.com/gookit/color v1.2.0

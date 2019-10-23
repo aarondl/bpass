@@ -48,6 +48,20 @@ const (
 	KeyTwoFactor = "twofactor"
 	KeyNotes     = "notes"
 	KeyLabels    = "labels"
+
+	// Synchronization keys in user data
+	KeySync     = "sync"
+	KeySecret   = "secretkey"
+	KeyPub      = "pubkey"
+	KeyHost     = "host"
+	KeyPort     = "port"
+	KeyPath     = "path"
+	KeyLastSync = "lastsync"
+)
+
+const (
+	syncPrefix = "sync/"
+	syncMaster = syncPrefix + "master"
 )
 
 var (
@@ -65,10 +79,19 @@ var (
 		KeyTwoFactor,
 		KeyNotes,
 		KeyLabels,
+
+		KeySync,
+		KeySecret,
+		KeyPub,
+		KeyHost,
+		KeyPort,
+		KeyPath,
+		KeyLastSync,
 	}
 
 	// protectedKeys is a list of keys that cannot be set to a string value
 	protectedKeys = []string{
-		KeyName, KeyTwoFactor, KeyNotes, KeyUpdated, KeyLabels, KeySnapshots,
+		KeyTwoFactor, KeyNotes, KeyUpdated, KeyLabels, KeySnapshots,
+		KeySync, KeyLastSync,
 	}
 )

@@ -150,6 +150,7 @@ func readlineAutocompleter(entryCompleter func(string) []string) readline.AutoCo
 				readline.PcItem("notes"),
 			),
 		),
+		readline.PcItem("open", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("note", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("rmnote", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("label", readline.PcItemDynamic(entryCompleter)),
@@ -158,6 +159,14 @@ func readlineAutocompleter(entryCompleter func(string) []string) readline.AutoCo
 		readline.PcItem("user", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("email", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("totp", readline.PcItemDynamic(entryCompleter)),
+		readline.PcItem("sync",
+			readline.PcItem("add",
+				readline.PcItem("ssh"),
+			),
+			readline.PcItem("rm",
+				readline.PcItem("ssh"),
+			),
+		),
 	)
 }
 

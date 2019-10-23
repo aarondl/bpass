@@ -40,7 +40,17 @@ func (b Blob) ArbitraryKeys() (keys []string) {
 	return keys
 }
 
-// Name returns the name of the blob
+// UUID returns the uuid of the blob. Panics if the key is not found.
+func (b Blob) UUID() string {
+	uuid, ok := b[KeyUUID]
+	if !ok {
+		panic("uuid was not set")
+	}
+
+	return uuid.(string)
+}
+
+// Name returns the name of the blob. Panics if the key is not found.
 func (b Blob) Name() string {
 	name, ok := b[KeyName]
 	if !ok {
@@ -123,6 +133,11 @@ func (b Blob) Labels() (labels []string, err error) {
 	return b.getSlice(KeyLabels)
 }
 
+// Sync for the blob, returns nil if not set
+func (b Blob) Sync() (sync []string, err error) {
+	return b.getSlice(KeySync)
+}
+
 func (b Blob) getSlice(keyname string) (out []string, err error) {
 	intf := b[keyname]
 	if intf == nil {
@@ -148,7 +163,16 @@ func (b Blob) getSlice(keyname string) (out []string, err error) {
 
 // Updated timestamp, if not set or invalid will be the zero value for time
 func (b Blob) Updated() time.Time {
-	updatedIntf := b[KeyUpdated]
+	return b.getTimestamp(KeyUpdated)
+}
+
+// LastSync timestamp, if not set or invalid will be the zero value for time
+func (b Blob) LastSync() time.Time {
+	return b.getTimestamp(KeyLastSync)
+}
+
+func (b Blob) getTimestamp(key string) time.Time {
+	updatedIntf := b[key]
 	if updatedIntf == nil {
 		return time.Time{}
 	}
@@ -246,8 +270,9 @@ func (b Blob) addSnapshot() {
 func (b Blob) snapshot() map[string]interface{} {
 	clone := make(map[string]interface{}, len(b))
 	for k, v := range b {
-		// Do not include snapshots in the new snapshot
-		if k == KeySnapshots {
+		// Do not include uuid or snapshots in the new snapshot
+		switch k {
+		case KeySnapshots, KeyUUID:
 			continue
 		}
 

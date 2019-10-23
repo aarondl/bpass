@@ -38,7 +38,12 @@ Clipboard copy shortcuts (equivalent to cp name CMD):
  email <search>       - Copy email to clipboard
  totp  <search>       - Copy twofactor to clipboard
 
-Arguments:
+Sync commands:
+ sync              - Synchronize the file with all sources (pull, merge, push)
+ sync add <ssh>    - Add an automatic synchronization option
+ sync rm  <name>   - Removes automatic synchronization (use rm to delete sync entries permanently)
+
+Common Arguments:
   name:   a fully qualified name
   search: a fuzzy search (breaks on / for pseudo-folder structuring)
   index:  the number representing the item, not 0-based
@@ -353,6 +358,21 @@ func (r *repl) run() error {
 				}
 			}
 			err = r.ctx.show(name, snapshot)
+		case "sync":
+			if len(splits) == 0 {
+				err = r.ctx.sync()
+			} else {
+				kind := splits[1]
+				switch splits[0] {
+				case "add":
+					err = r.ctx.syncAdd(kind)
+				case "rm":
+					err = r.ctx.syncRemove(kind)
+				default:
+					errColor.Println("syntax: sync add <kind>")
+				}
+			}
+
 		case "help":
 			fmt.Println(replHelp)
 		default:
@@ -369,4 +389,77 @@ func (r *repl) run() error {
 			r.ctx.term.AddHistory(line)
 		}
 	}
+}
+
+// getString ensures a non-empty string
+func (u *uiContext) getString(key string) (string, error) {
+	var str string
+	var err error
+
+Again:
+	str, err = u.prompt(inputPromptColor.Sprint(key + ": "))
+	if err != nil {
+		return "", err
+	}
+	if len(str) == 0 {
+		errColor.Println(key, "cannot be empty")
+		goto Again
+	}
+
+	return str, nil
+}
+
+func (u *uiContext) getInt(key string, min, max int) (int, error) {
+	var str string
+	var err error
+	var integer int
+
+Again:
+	str, err = u.prompt(inputPromptColor.Sprint(key + ": "))
+	if err != nil {
+		return 0, err
+	}
+
+	if len(str) == 0 {
+		errColor.Println(key, "cannot be empty")
+		goto Again
+	}
+
+	integer, err = strconv.Atoi(str)
+	if err != nil {
+		errColor.Printf("%s must be an integer between %d and %d\n", key, min, max)
+		goto Again
+	}
+
+	return integer, nil
+}
+
+func (u *uiContext) getMenuChoice(prompt string, items []string) (int, error) {
+	var choice string
+	var integer int
+	var i int
+	var item string
+	var err error
+
+Again:
+	for i, item = range items {
+		inputPromptColor.Printf(" %d) %s\n", i+1, item)
+	}
+	choice, err = u.prompt(infoColor.Sprint(prompt))
+	if err != nil {
+		return 0, err
+	}
+
+	integer, err = strconv.Atoi(choice)
+	if err != nil {
+		errColor.Println("invalid choice")
+		goto Again
+	}
+
+	integer--
+	if integer < 0 || integer >= len(items) {
+		goto Again
+	}
+
+	return integer, nil
 }

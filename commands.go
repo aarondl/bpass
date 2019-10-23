@@ -12,7 +12,6 @@ import (
 	"github.com/aarondl/bpass/crypt"
 
 	"github.com/atotto/clipboard"
-	uuidpkg "github.com/gofrs/uuid"
 	"github.com/gookit/color"
 )
 
@@ -71,12 +70,12 @@ func (u *uiContext) addNew(name string) error {
 		}
 	}
 
-	user, err := u.prompt(inputPromptColor.Sprint("user: "))
+	email, err := u.prompt(inputPromptColor.Sprint("email: "))
 	if err != nil {
 		return err
 	}
 
-	email, err := u.prompt(inputPromptColor.Sprint("email: "))
+	user, err := u.prompt(inputPromptColor.Sprint("user: "))
 	if err != nil {
 		return err
 	}
@@ -110,14 +109,10 @@ func (u *uiContext) addNew(name string) error {
 
 	// Here we directly add things as the interface allows so that we can
 	// avoid creating useless snapshots as we create the initial blob
-	newBlob := make(map[string]interface{})
-	uuid, err := uuidpkg.NewV4()
+	newBlob, err := u.store.New(name)
 	if err != nil {
 		return err
 	}
-
-	newBlob[blobformat.KeyUUID] = uuid.String()
-	newBlob[blobformat.KeyName] = name
 
 	if len(user) != 0 {
 		newBlob[blobformat.KeyUser] = user
@@ -138,33 +133,30 @@ func (u *uiContext) addNew(name string) error {
 	newBlob[blobformat.KeyUpdated] = timestamp
 
 	// Save the thing
-	u.store[uuid.String()] = newBlob
-	return nil
+	return u.store.Add(newBlob)
 }
 
 func (u *uiContext) rename(src, dst string) error {
-	_, dstOk := u.store[dst]
-	if dstOk {
-		errColor.Printf("%q already exists\n", dst)
+	oldUUID, _ := u.store.Find(src)
+	if len(oldUUID) == 0 {
+		errColor.Println(src, "does not exist")
 		return nil
 	}
 
-	obj, srcOk := u.store[src]
-	if !srcOk {
-		errColor.Printf("%q not found\n", src)
+	if err := u.store.Rename(oldUUID, dst); err == blobformat.ErrNameNotUnique {
+		errColor.Println(dst, "already exists")
 		return nil
+	} else if err != nil {
+		return err
 	}
 
 	infoColor.Printf("moved %q => %q\n", src, dst)
-
-	u.store[dst] = obj
-	delete(u.store, src)
 	return nil
 }
 
 func (u *uiContext) remove(name string) error {
-	_, ok := u.store[name]
-	if !ok {
+	uuid, _ := u.store.Find(name)
+	if len(uuid) == 0 {
 		errColor.Printf("%q not found\n", name)
 		return nil
 	}
@@ -249,7 +241,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		if copy {
 			copyToClipboard(strings.Join(labels, ","))
 		} else {
-			showLabels(labels, 0, 0)
+			showJoinedSlice("labels", labels, 0, 0)
 		}
 
 	case "note", blobformat.KeyNotes:
@@ -387,7 +379,9 @@ func (u *uiContext) set(search, key, value string) error {
 			errColor.Println(err)
 			return nil
 		}
-	case blobformat.KeyUpdated, blobformat.KeySnapshots:
+	case blobformat.KeyUpdated, blobformat.KeySnapshots, blobformat.KeySync,
+		blobformat.KeyLastSync, blobformat.KeyPub, blobformat.KeySecret:
+
 		errColor.Printf("%s cannot be set manually\n", key)
 	default:
 		u.store.Set(uuid, key, value)
@@ -677,6 +671,13 @@ func (u *uiContext) show(search string, snapshot int) error {
 
 	width := 8 // Hardcoded max of the known keys, sad, I know
 	arbitrary := entry.ArbitraryKeys()
+	// Add back some known keys because we don't give a crap when they're
+	// displayed
+	arbitrary = append(arbitrary,
+		blobformat.KeyPub,
+		blobformat.KeyPath,
+		blobformat.KeyHost,
+		blobformat.KeyPort)
 	for _, k := range arbitrary {
 		if len(k) > width {
 			width = len(k) + 1 // +1 for : character
@@ -685,6 +686,9 @@ func (u *uiContext) show(search string, snapshot int) error {
 	width *= -1
 	indent := 2
 
+	if snapshot != 0 {
+		showKeyValue(blobformat.KeyName, entry.Name(), width, indent)
+	}
 	showKeyValue(blobformat.KeyUser, entry.Get(blobformat.KeyUser), width, indent)
 	showKeyValue(blobformat.KeyEmail, entry.Get(blobformat.KeyEmail), width, indent)
 	showHidden(blobformat.KeyPass, entry.Get(blobformat.KeyPass), width, indent)
@@ -699,7 +703,7 @@ func (u *uiContext) show(search string, snapshot int) error {
 	if err != nil {
 		fmt.Println("Error fetching labels:", err)
 	} else if len(labels) > 0 {
-		showLabels(labels, width, indent)
+		showJoinedSlice("labels", labels, width, indent)
 	}
 
 	notes, err := entry.Notes()
@@ -709,9 +713,20 @@ func (u *uiContext) show(search string, snapshot int) error {
 		showNotes(notes, width, indent)
 	}
 
+	syncs, err := entry.Sync()
+	if err != nil {
+		fmt.Println("Error retrieving syncs:", err)
+	} else if len(syncs) > 0 {
+		showJoinedSlice("sync", syncs, width, indent)
+	}
+
 	sort.Strings(arbitrary)
 	for _, k := range arbitrary {
-		showKeyValue(k, entry.Get(k), width, indent)
+		val := entry.Get(k)
+		if len(val) == 0 {
+			continue
+		}
+		showKeyValue(k, val, width, indent)
 	}
 
 	if update := entry.Updated(); !update.IsZero() {
@@ -735,9 +750,9 @@ func showHidden(key, value string, width, indent int) {
 	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, key+":"), passColor.Sprint(value))
 }
 
-func showLabels(labels []string, width, indent int) {
+func showJoinedSlice(label string, slice []string, width, indent int) {
 	ind := strings.Repeat(" ", indent)
-	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, "labels:"), strings.Join(labels, ", "))
+	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, label+":"), strings.Join(slice, ", "))
 }
 
 func showNotes(notes []string, width, indent int) {
