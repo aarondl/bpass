@@ -780,40 +780,58 @@ func showNote(number int, note string, indent int) {
 	}
 }
 
-func (u *uiContext) prompt(prompt string) (string, error) {
-	line, err := u.term.Line(prompt)
-	if err != nil {
-		return "", err
+func (u *uiContext) dump(search string) error {
+	uuid, ok := u.singleName(search)
+	if !ok {
+		return nil
 	}
 
-	return line, nil
+	blobIntf := u.store[uuid]
+	blob := blobIntf.(map[string]interface{})
+
+	showBlob(blob, 0)
+
+	return nil
 }
 
-// singleName returns false iff it printed an error message to the user
-func (u *uiContext) singleName(search string) (string, bool) {
-	entries := u.store.Search(search)
-	switch len(entries) {
-	case 0:
-		errColor.Printf("No matches for search (%q)\n", search)
-		return "", false
-	case 1:
-		ids := entries.UUIDs()
-		id := ids[0]
-		name := entries[id]
-		if search != name {
-			infoColor.Printf("using: %s\n", name)
+func showBlob(blob map[string]interface{}, indent int) {
+	for k, v := range blob {
+		switch k {
+		case blobformat.KeySnapshots:
+			slice, ok := v.([]interface{})
+			if !ok {
+				fmt.Printf("snapshots are the wrong type: %T\n", v)
+				break
+			}
+
+			for i, snap := range slice {
+				snapshot, ok := snap.(map[string]interface{})
+				if !ok {
+					fmt.Printf("snapshot %d is the wrong type: %T\n", i, snap)
+					continue
+				}
+
+				fmt.Printf("snapshot[%d]:\n", i)
+				showBlob(snapshot, indent+2)
+			}
+		case blobformat.KeyNotes, blobformat.KeyLabels, blobformat.KeySync:
+			slice, ok := v.([]interface{})
+			if !ok {
+				fmt.Printf("%s are the wrong type: %T\n", k, v)
+				break
+			}
+			for i, s := range slice {
+				str, ok := s.(string)
+				if !ok {
+					fmt.Printf("%s %d is the wrong type: %T\n", k, i, s)
+				}
+				ind := strings.Repeat(" ", indent)
+				fmt.Printf("%s%s[%d]:\n%s%s\n", ind, k, i, ind, str)
+			}
+		default:
+			fmt.Printf("%s%s: %#v\n", strings.Repeat(" ", indent), k, v)
 		}
-
-		return id, true
 	}
-
-	names := entries.Names()
-	sort.Strings(names)
-	errColor.Printf("Multiple matches for search (%q):", search)
-	fmt.Print("\n  ")
-	fmt.Println(strings.Join(names, "\n  "))
-
-	return "", false
 }
 
 // validateLabel prints an error and returns false if the label was bad

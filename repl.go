@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -42,6 +43,9 @@ Sync commands:
  sync              - Synchronize the file with all sources (pull, merge, push)
  sync add <ssh>    - Add an automatic synchronization option
  sync rm  <name>   - Removes automatic synchronization (use rm to delete sync entries permanently)
+
+Debug commands:
+ dump <search>     - Dumps an entire entry in debug mode
 
 Common Arguments:
   name:   a fully qualified name
@@ -373,6 +377,18 @@ func (r *repl) run() error {
 				}
 			}
 
+		case "dump":
+			name := r.ctxEntry
+			if len(name) == 0 {
+				if len(splits) == 0 {
+					errColor.Println("syntax: dump <search>")
+					continue
+				}
+				name = splits[0]
+			}
+
+			err = r.ctx.dump(name)
+
 		case "help":
 			fmt.Println(replHelp)
 		default:
@@ -389,6 +405,43 @@ func (r *repl) run() error {
 			r.ctx.term.AddHistory(line)
 		}
 	}
+}
+
+func (u *uiContext) prompt(prompt string) (string, error) {
+	line, err := u.term.Line(prompt)
+	if err != nil {
+		return "", err
+	}
+
+	return line, nil
+}
+
+// singleName returns false iff it printed an error message to the user, true
+// if it found a uuid
+func (u *uiContext) singleName(search string) (string, bool) {
+	entries := u.store.Search(search)
+	switch len(entries) {
+	case 0:
+		errColor.Printf("No matches for search (%q)\n", search)
+		return "", false
+	case 1:
+		ids := entries.UUIDs()
+		id := ids[0]
+		name := entries[id]
+		if search != name {
+			infoColor.Printf("using: %s\n", name)
+		}
+
+		return id, true
+	}
+
+	names := entries.Names()
+	sort.Strings(names)
+	errColor.Printf("Multiple matches for search (%q):", search)
+	fmt.Print("\n  ")
+	fmt.Println(strings.Join(names, "\n  "))
+
+	return "", false
 }
 
 // getString ensures a non-empty string
