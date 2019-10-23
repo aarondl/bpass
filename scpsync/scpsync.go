@@ -23,6 +23,24 @@
 //  the reply in binary and the \n that can be displayed to the user.
 //
 // File size is restricted to int64 (not uint64)
+//
+// Of particular note is the way the "acks" work. In source mode (-f):
+//
+//  client: 0
+//  scp -f: Cmmmm <length> <filename>\n
+//  client: 0
+//  scp -f: DATA (<length> bytes)
+//  client: 0
+//  scp -f: process exits 0
+//
+// And the way it works in sink mode (-t):
+//
+//  client: Cmmmm <length> <filename>\n
+//  client: DATA (length bytes)
+//  client: 0
+//  scp -t: 0
+//
+// Note any of the above 0's could possibly be a 1 or a 2 with a message.
 package scpsync
 
 import (
