@@ -11,7 +11,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/aarondl/bpass/blobformat"
+	"github.com/aarondl/bpass/txblob"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -63,7 +63,7 @@ func (u *uiContext) syncAdd(kind string) error {
 	if err != nil {
 		return err
 	}
-	newEntry[blobformat.KeyHost] = host
+	newEntry[txblob.KeyHost] = host
 
 	port := "22"
 	for {
@@ -84,13 +84,13 @@ func (u *uiContext) syncAdd(kind string) error {
 
 		break
 	}
-	newEntry[blobformat.KeyPort] = port
+	newEntry[txblob.KeyPort] = port
 
 	file, err := u.getString("path")
 	if err != nil {
 		return err
 	}
-	newEntry[blobformat.KeyPath] = file
+	newEntry[txblob.KeyPath] = file
 
 	inputPromptColor.Println("Key type:")
 	choice, err := u.getMenuChoice(inputPromptColor.Sprint("> "), []string{"ED25519", "RSA 4096", "Password"})
@@ -120,8 +120,8 @@ func (u *uiContext) syncAdd(kind string) error {
 		}
 		publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public)))
 
-		newEntry[blobformat.KeySecret] = string(bytes.TrimSpace(b))
-		newEntry[blobformat.KeyPub] = publicStr
+		newEntry[txblob.KeySecret] = string(bytes.TrimSpace(b))
+		newEntry[txblob.KeyPub] = publicStr
 
 		infoColor.Printf("successfully generated new ed25519 key:\n%s\n", publicStr)
 
@@ -147,8 +147,8 @@ func (u *uiContext) syncAdd(kind string) error {
 		}
 		publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public)))
 
-		newEntry[blobformat.KeySecret] = string(bytes.TrimSpace(b))
-		newEntry[blobformat.KeyPub] = publicStr
+		newEntry[txblob.KeySecret] = string(bytes.TrimSpace(b))
+		newEntry[txblob.KeyPub] = publicStr
 
 		infoColor.Printf("successfully generated new rsa-4096 key:\n%s\n", publicStr)
 
@@ -163,8 +163,8 @@ func (u *uiContext) syncAdd(kind string) error {
 			return err
 		}
 
-		newEntry[blobformat.KeyUser] = user
-		newEntry[blobformat.KeyPass] = pass
+		newEntry[txblob.KeyUser] = user
+		newEntry[txblob.KeyPass] = pass
 	default:
 		panic("how did this happen?")
 	}
@@ -195,14 +195,4 @@ func (u *uiContext) syncRemove(name string) error {
 
 	infoColor.Printf("removed %q from sync (use rm to delete entry)\n", name)
 	return nil
-}
-
-func (u *uiContext) findSyncMaster() (string, blobformat.Blob) {
-	for uuid, blob := range u.store {
-		if blob.Name() == syncMasterKey {
-			return uuid, blob
-		}
-	}
-
-	return "", nil
 }

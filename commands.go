@@ -8,8 +8,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
+	"github.com/aarondl/bpass/txblob"
 
 	"github.com/atotto/clipboard"
 	"github.com/gookit/color"
@@ -64,7 +64,7 @@ func (u *uiContext) addNewInterruptible(name string) error {
 func (u *uiContext) addNew(name string) error {
 	newBlob, err := u.store.New(name)
 	if err != nil {
-		if err == blobformat.ErrNameNotUnique {
+		if err == txblob.ErrNameNotUnique {
 			errColor.Printf("%q already exists\n", name)
 			return nil
 		}
@@ -109,22 +109,22 @@ func (u *uiContext) addNew(name string) error {
 	}
 
 	if len(user) != 0 {
-		newBlob[blobformat.KeyUser] = user
+		newBlob[txblob.KeyUser] = user
 	}
 	if len(email) != 0 {
-		newBlob[blobformat.KeyEmail] = email
+		newBlob[txblob.KeyEmail] = email
 	}
 	if len(pass) != 0 {
-		newBlob[blobformat.KeyPass] = pass
+		newBlob[txblob.KeyPass] = pass
 	}
 	if len(labels) != 0 {
 		uglyConvert := make([]interface{}, len(labels))
 		for i := range labels {
 			uglyConvert[i] = labels[i]
 		}
-		newBlob[blobformat.KeyLabels] = uglyConvert
+		newBlob[txblob.KeyLabels] = uglyConvert
 	}
-	newBlob[blobformat.KeyUpdated] = timestamp
+	newBlob[txblob.KeyUpdated] = timestamp
 
 	// Save the thing
 	return u.store.Add(newBlob)
@@ -137,7 +137,7 @@ func (u *uiContext) rename(src, dst string) error {
 		return nil
 	}
 
-	if err := u.store.Rename(oldUUID, dst); err == blobformat.ErrNameNotUnique {
+	if err := u.store.Rename(oldUUID, dst); err == txblob.ErrNameNotUnique {
 		errColor.Println(dst, "already exists")
 		return nil
 	} else if err != nil {
@@ -209,7 +209,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 	entry := u.store.Get(uuid)
 
 	switch key {
-	case "label", blobformat.KeyLabels:
+	case "label", txblob.KeyLabels:
 		labels, err := entry.Labels()
 		if err != nil {
 			errColor.Println("failed to retrieve labels:", err)
@@ -238,7 +238,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 			showJoinedSlice("labels", labels, 0, 0)
 		}
 
-	case "note", blobformat.KeyNotes:
+	case "note", txblob.KeyNotes:
 		notes, err := entry.Notes()
 		if err != nil {
 			errColor.Println("Failed to retrieve notes:", err)
@@ -268,7 +268,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 			showNotes(notes, 0, 0)
 		}
 
-	case "totp", blobformat.KeyTwoFactor:
+	case "totp", txblob.KeyTwoFactor:
 		val, err := entry.TwoFactor()
 		if err != nil {
 			errColor.Println(err)
@@ -284,14 +284,14 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		} else {
 			showKeyValue("totp", val, 0, 0)
 		}
-	case blobformat.KeyUpdated:
+	case txblob.KeyUpdated:
 		value := entry.Updated().Format(time.RFC3339)
 		if copy {
 			copyToClipboard(value)
 		} else {
 			showKeyValue("updated", value, 0, 0)
 		}
-	case blobformat.KeySnapshots:
+	case txblob.KeySnapshots:
 		n, err := entry.NSnapshots()
 		if err != nil {
 			errColor.Println(err)
@@ -311,7 +311,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 
 		if copy {
 			copyToClipboard(value)
-		} else if key == blobformat.KeyPass {
+		} else if key == txblob.KeyPass {
 			showHidden(key, value, 0, 0)
 		} else {
 			showKeyValue(key, value, 0, 0)
@@ -329,7 +329,7 @@ func (u *uiContext) set(search, key, value string) error {
 
 	entry := u.store.Get(uuid)
 
-	if key == blobformat.KeyPass {
+	if key == txblob.KeyPass {
 		if len(value) == 0 {
 			var err error
 			value, err = u.getPassword()
@@ -347,7 +347,7 @@ func (u *uiContext) set(search, key, value string) error {
 	}
 
 	switch key {
-	case "label", blobformat.KeyLabels:
+	case "label", txblob.KeyLabels:
 		labels, err := entry.Labels()
 		if err != nil {
 			errColor.Println("Failed to retrieve labels:", err)
@@ -359,7 +359,7 @@ func (u *uiContext) set(search, key, value string) error {
 		}
 		labels = append(labels, value)
 		u.store.SetLabels(uuid, labels)
-	case "note", blobformat.KeyNotes:
+	case "note", txblob.KeyNotes:
 		notes, err := entry.Notes()
 		if err != nil {
 			errColor.Println("Failed to retrieve notes:", err)
@@ -368,13 +368,13 @@ func (u *uiContext) set(search, key, value string) error {
 
 		notes = append(notes, value)
 		u.store.SetNotes(uuid, notes)
-	case "totp", blobformat.KeyTwoFactor:
+	case "totp", txblob.KeyTwoFactor:
 		if err := u.store.SetTwofactor(uuid, value); err != nil {
 			errColor.Println(err)
 			return nil
 		}
-	case blobformat.KeyUpdated, blobformat.KeySnapshots, blobformat.KeySync,
-		blobformat.KeyLastSync, blobformat.KeyPub, blobformat.KeySecret:
+	case txblob.KeyUpdated, txblob.KeySnapshots, txblob.KeySync,
+		txblob.KeyLastSync, txblob.KeyPub, txblob.KeySecret:
 
 		errColor.Printf("%s cannot be set manually\n", key)
 	default:
@@ -668,10 +668,10 @@ func (u *uiContext) show(search string, snapshot int) error {
 	// Add back some known keys because we don't give a crap when they're
 	// displayed
 	arbitrary = append(arbitrary,
-		blobformat.KeyPub,
-		blobformat.KeyPath,
-		blobformat.KeyHost,
-		blobformat.KeyPort)
+		txblob.KeyPub,
+		txblob.KeyPath,
+		txblob.KeyHost,
+		txblob.KeyPort)
 	for _, k := range arbitrary {
 		if len(k) > width {
 			width = len(k) + 1 // +1 for : character
@@ -681,11 +681,11 @@ func (u *uiContext) show(search string, snapshot int) error {
 	indent := 2
 
 	if snapshot != 0 {
-		showKeyValue(blobformat.KeyName, entry.Name(), width, indent)
+		showKeyValue(txblob.KeyName, entry.Name(), width, indent)
 	}
-	showKeyValue(blobformat.KeyUser, entry.Get(blobformat.KeyUser), width, indent)
-	showKeyValue(blobformat.KeyEmail, entry.Get(blobformat.KeyEmail), width, indent)
-	showHidden(blobformat.KeyPass, entry.Get(blobformat.KeyPass), width, indent)
+	showKeyValue(txblob.KeyUser, entry.Get(txblob.KeyUser), width, indent)
+	showKeyValue(txblob.KeyEmail, entry.Get(txblob.KeyEmail), width, indent)
+	showHidden(txblob.KeyPass, entry.Get(txblob.KeyPass), width, indent)
 	t, err := entry.TwoFactor()
 	if err != nil {
 		fmt.Println("Error retrieving two factor:", err)
@@ -789,7 +789,7 @@ func (u *uiContext) dump(search string) error {
 func dumpBlob(blob map[string]interface{}, indent int) {
 	for k, v := range blob {
 		switch k {
-		case blobformat.KeySnapshots:
+		case txblob.KeySnapshots:
 			slice, ok := v.([]interface{})
 			if !ok {
 				fmt.Printf("snapshots are the wrong type: %T\n", v)
@@ -806,7 +806,7 @@ func dumpBlob(blob map[string]interface{}, indent int) {
 				fmt.Printf("snapshot[%d]:\n", i)
 				dumpBlob(snapshot, indent+2)
 			}
-		case blobformat.KeyNotes, blobformat.KeyLabels, blobformat.KeySync:
+		case txblob.KeyNotes, txblob.KeyLabels, txblob.KeySync:
 			slice, ok := v.([]interface{})
 			if !ok {
 				fmt.Printf("%s are the wrong type: %T\n", k, v)
