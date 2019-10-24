@@ -387,7 +387,7 @@ func (b Blobs) RemoveLabel(uuid string, indexUUID string) (err error) {
 	if err = b.touchUpdated(uuid); err != nil {
 		return err
 	}
-	return b.DeleteList(uuid, KeyNotes, indexUUID)
+	return b.DeleteList(uuid, KeyLabels, indexUUID)
 }
 
 // NewSync creates a new blob with a unique name to have values set on it before
