@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -88,8 +89,6 @@ func (u *uiContext) addNew(name string) (err error) {
 			return err
 		}
 
-		timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
-
 		// Use raw sets here to avoid creating history spam based on timestamp
 		// additions
 		if len(user) != 0 {
@@ -106,9 +105,6 @@ func (u *uiContext) addNew(name string) (err error) {
 			if err = u.store.Store.Set(uuid, txblob.KeyPass, pass); err != nil {
 				return err
 			}
-		}
-		if err = u.store.Store.Set(uuid, txblob.KeyUpdated, timestamp); err != nil {
-			return err
 		}
 
 		return nil
@@ -202,7 +198,7 @@ func (u *uiContext) listByLabels(wantLabels []string) error {
 func (u *uiContext) get(search, key string, index int, copy bool) error {
 	uuid, err := u.findOne(search)
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(uuid) == 0 {
 		return nil
@@ -333,7 +329,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 func (u *uiContext) set(search, key, value string) error {
 	uuid, err := u.findOne(search)
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(uuid) == 0 {
 		return nil
@@ -406,7 +402,7 @@ func (u *uiContext) set(search, key, value string) error {
 func (u *uiContext) addNote(search string) error {
 	uuid, err := u.findOne(search)
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(uuid) == 0 {
 		return nil
@@ -459,7 +455,7 @@ func (u *uiContext) addNoteToEntry(uuid string) error {
 func (u *uiContext) addLabels(search string) error {
 	uuid, err := u.findOne(search)
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(uuid) == 0 {
 		return nil
@@ -510,7 +506,7 @@ func (u *uiContext) addLabels(search string) error {
 func (u *uiContext) deleteNote(search string, number int) error {
 	uuid, err := u.findOne(search)
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(uuid) == 0 {
 		return nil
@@ -545,7 +541,7 @@ func (u *uiContext) deleteNote(search string, number int) error {
 func (u *uiContext) deleteLabel(search string, label string) error {
 	uuid, err := u.findOne(search)
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(uuid) == 0 {
 		return nil
@@ -684,7 +680,7 @@ func (u *uiContext) getPassword() (string, error) {
 func (u *uiContext) show(search string, snapshot int) error {
 	uuid, err := u.findOne(search)
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(uuid) == 0 {
 		return nil
@@ -729,7 +725,9 @@ func (u *uiContext) show(search string, snapshot int) error {
 	indent := 2
 
 	if snapshot != 0 {
-		showKeyValue(txblob.KeyName, blob.Name(), width, indent)
+		// We don't use .Name() helper because when digging into history
+		// it can end up being nil.
+		showKeyValue(txblob.KeyName, blob.Get(txblob.KeyName), width, indent)
 	}
 	showKeyValue(txblob.KeyUser, blob.Get(txblob.KeyUser), width, indent)
 	showKeyValue(txblob.KeyEmail, blob.Get(txblob.KeyEmail), width, indent)
@@ -830,7 +828,7 @@ func showNote(number int, note string, indent int) {
 func (u *uiContext) dump(search string) error {
 	uuid, err := u.findOne(search)
 	if err != nil {
-		return nil
+		return err
 	}
 	if len(uuid) == 0 {
 		return nil
@@ -842,6 +840,15 @@ func (u *uiContext) dump(search string) error {
 	}
 	dumpBlob(blob, 0)
 
+	return nil
+}
+
+func (u *uiContext) dumpall() error {
+	b, err := json.MarshalIndent(u.store.Store, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s\n", b)
 	return nil
 }
 

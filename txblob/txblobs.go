@@ -272,7 +272,7 @@ func (b Blobs) New(name string) (uuid string, err error) {
 	if err = b.touchUpdated(uuid); err != nil {
 		return "", err
 	}
-	if err = b.Set(uuid, KeyName, name); err != nil {
+	if err = b.Store.Set(uuid, KeyName, name); err != nil {
 		return "", err
 	}
 
@@ -301,7 +301,7 @@ func (b Blobs) Rename(uuid, newName string) error {
 	if err := b.touchUpdated(uuid); err != nil {
 		return err
 	}
-	return b.Set(uuid, KeyName, newName)
+	return b.Store.Set(uuid, KeyName, newName)
 }
 
 // Set the key in name to value, properly updates 'updated' and 'snapshots'.
@@ -442,7 +442,7 @@ func (b Blobs) AddSync(uuid string) error {
 		}
 	}
 
-	_, err = b.Append(masterUUID, KeySync, uuid)
+	_, err = b.Store.Append(masterUUID, KeySync, uuid)
 	return nil
 }
 
@@ -476,5 +476,5 @@ func (b Blobs) RemoveSync(uuid string) (bool, error) {
 
 // touchUpdated refreshes the updated timestamp for the given item
 func (b Blobs) touchUpdated(uuid string) error {
-	return b.Set(uuid, KeyUpdated, strconv.FormatInt(time.Now().UnixNano(), 10))
+	return b.Store.Set(uuid, KeyUpdated, strconv.FormatInt(time.Now().UnixNano(), 10))
 }

@@ -42,16 +42,6 @@ func (b Blob) ArbitraryKeys() (keys []string) {
 	return keys
 }
 
-// UUID returns the uuid of the blob. Panics if the key is not found.
-func (b Blob) UUID() string {
-	uuid, ok := b[KeyUUID]
-	if !ok {
-		panic("uuid was not set")
-	}
-
-	return uuid.(string)
-}
-
 // Name returns the name of the blob. Panics if the key is not found.
 func (b Blob) Name() string {
 	name, ok := b[KeyName]
@@ -114,17 +104,29 @@ func (b Blob) TwoFactor() (string, error) {
 
 // Notes for the blob, returns nil if not set
 func (b Blob) Notes() (notes []txformat.ListEntry, err error) {
-	return txformat.Entry(b).List(KeyNotes)
+	notes, err = txformat.Entry(b).List(KeyNotes)
+	if err != nil && txformat.IsKeyNotFound(err) {
+		err = nil
+	}
+	return notes, err
 }
 
 // Labels for the blob, nil if none set.
 func (b Blob) Labels() (labels []txformat.ListEntry, err error) {
-	return txformat.Entry(b).List(KeyLabels)
+	labels, err = txformat.Entry(b).List(KeyLabels)
+	if err != nil && txformat.IsKeyNotFound(err) {
+		err = nil
+	}
+	return labels, err
 }
 
 // Sync for the blob, returns nil if not set
 func (b Blob) Sync() (sync []txformat.ListEntry, err error) {
-	return txformat.Entry(b).List(KeySync)
+	sync, err = txformat.Entry(b).List(KeySync)
+	if err != nil && txformat.IsKeyNotFound(err) {
+		err = nil
+	}
+	return sync, err
 }
 
 // Updated timestamp, if not set it will be time's zero value, returns an error

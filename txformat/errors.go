@@ -25,7 +25,7 @@ func (k KeyNotFound) Error() string {
 		if len(str) != 0 {
 			str += ":"
 		}
-		str += k.UUID
+		str += k.Key
 		obj = "key"
 	}
 	if len(k.Index) != 0 {

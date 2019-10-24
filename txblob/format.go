@@ -4,7 +4,6 @@ package txblob
 // Keys for the map
 const (
 	// System level keys (things that allow the system to work)
-	KeyUUID      = "uuid"
 	KeyName      = "name"
 	KeyDeleted   = "deleted"
 	KeyUpdated   = "updated"
@@ -36,7 +35,6 @@ const (
 var (
 	// known keys is a list of all known keys
 	knownKeys = []string{
-		KeyUUID,
 		KeyName,
 		KeyDeleted,
 		KeyUpdated,

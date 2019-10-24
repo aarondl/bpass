@@ -46,6 +46,7 @@ Sync commands:
 
 Debug commands:
  dump <search>     - Dumps an entire entry in debug mode
+ dumpall           - Dumps the entire store in debug mode
 
 Common Arguments:
   name:   a fully qualified name
@@ -138,15 +139,21 @@ func (r *repl) run() error {
 			case 0:
 				r.prompt = promptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 			case 1:
-				var name string
-				name, err = r.ctx.findOne(splits[0])
+				var uuid string
+				uuid, err = r.ctx.findOne(splits[0])
 				if err != nil {
 					return err
 				}
-				if len(name) == 0 {
+				if len(uuid) == 0 {
 					continue
 				}
-				r.ctxEntry = name
+
+				blob, err := r.ctx.store.Get(uuid)
+				if err != nil {
+					return err
+				}
+
+				r.ctxEntry = blob.Name()
 				r.prompt = promptColor.Sprintf(dirPrompt, r.ctx.shortFilename, r.ctxEntry)
 			default:
 				fmt.Println("cd needs an argument")
@@ -392,6 +399,9 @@ func (r *repl) run() error {
 			}
 
 			err = r.ctx.dump(name)
+
+		case "dumpall":
+			err = r.ctx.dumpall()
 
 		case "help":
 			fmt.Println(replHelp)

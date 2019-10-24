@@ -555,6 +555,10 @@ func applyTx(dst map[string]Entry, tx Tx) error {
 
 		list, err := entry.List(tx.Key)
 		if err != nil {
+			if k, ok := err.(KeyNotFound); ok {
+				k.UUID = tx.UUID
+				return k
+			}
 			return err
 		}
 
