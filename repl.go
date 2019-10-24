@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gookit/color"
-
 	"github.com/aarondl/bpass/blobformat"
+
+	"github.com/gookit/color"
 )
 
 var replHelp = `Commands:

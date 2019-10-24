@@ -789,12 +789,12 @@ func (u *uiContext) dump(search string) error {
 	blobIntf := u.store[uuid]
 	blob := blobIntf.(map[string]interface{})
 
-	showBlob(blob, 0)
+	dumpBlob(blob, 0)
 
 	return nil
 }
 
-func showBlob(blob map[string]interface{}, indent int) {
+func dumpBlob(blob map[string]interface{}, indent int) {
 	for k, v := range blob {
 		switch k {
 		case blobformat.KeySnapshots:
@@ -812,7 +812,7 @@ func showBlob(blob map[string]interface{}, indent int) {
 				}
 
 				fmt.Printf("snapshot[%d]:\n", i)
-				showBlob(snapshot, indent+2)
+				dumpBlob(snapshot, indent+2)
 			}
 		case blobformat.KeyNotes, blobformat.KeyLabels, blobformat.KeySync:
 			slice, ok := v.([]interface{})
