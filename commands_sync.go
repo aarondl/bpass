@@ -198,9 +198,7 @@ func (u *uiContext) syncRemove(name string) error {
 }
 
 func (u *uiContext) findSyncMaster() (string, blobformat.Blob) {
-	for uuid, blobIntf := range u.store {
-		blob := blobformat.Blob(blobIntf.(map[string]interface{}))
-
+	for uuid, blob := range u.store {
 		if blob.Name() == syncMasterKey {
 			return uuid, blob
 		}

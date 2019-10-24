@@ -39,6 +39,8 @@ type Store struct {
 	Snapshot map[string]Entry `msgpack:"snapshot,omitempty" json:"snapshot,omitempty"`
 	// Log of all transactions.
 	Log []Tx `msgpack:"log,omitempty" json:"log,omitempty"`
+
+	txPoint int
 }
 
 type storeNoSnapshot struct {
@@ -67,6 +69,10 @@ func NewLogOnly(data []byte) (*Store, error) {
 
 // Save marshals as json blob
 func (s *Store) Save() ([]byte, error) {
+	if s.txPoint != 0 {
+		return nil, errors.New("refusing to save while transaction active")
+	}
+
 	return json.Marshal(s)
 }
 
@@ -86,7 +92,7 @@ func (s *Store) Add() (uuid string, err error) {
 	s.Log = append(s.Log,
 		Tx{
 			ID:   idObj.String(),
-			Time: time.Now().Unix(),
+			Time: time.Now().UnixNano(),
 			Kind: TxAdd,
 			UUID: uuidObj.String(),
 		},
@@ -165,8 +171,75 @@ func (s *Store) appendLog(tx Tx) error {
 		return err
 	}
 	tx.ID = uuidObj.String()
-	tx.Time = time.Now().Unix()
+	tx.Time = time.Now().UnixNano()
 	s.Log = append(s.Log, tx)
+	return nil
+}
+
+// Begin a transaction, will panic if commit/rollback have not been issued
+// after a previous Begin.
+//
+// We add 1 to the length to keep the 0 valid as a "no transaction started"
+// sentinel value.
+func (s *Store) Begin() {
+	s.txPoint = len(s.Log) + 1
+}
+
+// Commit the transactions to the log
+func (s *Store) Commit() {
+	if s.txPoint == 0 {
+		panic("commit called before begin")
+	}
+	s.txPoint = 0
+}
+
+// Rollback to the last begin point, invalidates the snapshot if necessary
+func (s *Store) Rollback() {
+	if s.txPoint == 0 {
+		panic("rollback called before begin")
+	}
+
+	if s.Version > uint(s.txPoint) {
+		s.Version = 0
+		s.Snapshot = nil
+	}
+
+	s.Log = s.Log[:s.txPoint-1]
+	s.txPoint = 0
+}
+
+// Do a transaction, if an error is returned by the lambda then
+// the transaction is rolled back.
+func (s *Store) Do(fn func() error) error {
+	s.Begin()
+	err := fn()
+	if err != nil {
+		s.Rollback()
+	} else {
+		s.Commit()
+	}
+	return err
+}
+
+// RollbackN undoes the last N transactions and invalidates the snapshot
+// if necessary.
+func (s *Store) RollbackN(n uint) error {
+	if n == 0 {
+		return nil
+	}
+
+	ln := uint(len(s.Log))
+	if n > ln {
+		return errors.New("cannot rollback past the beginning")
+	}
+
+	if s.Version > ln-n {
+		s.Version = 0
+		s.Snapshot = nil
+	}
+
+	s.Log = s.Log[:ln-n]
+
 	return nil
 }
 
@@ -243,6 +316,32 @@ func (s *Store) EntrySnapshotAt(uuid string, versionsAgo int) (Entry, error) {
 	}
 
 	return nil, KeyNotFound{UUID: uuid}
+}
+
+// NVersions returns the number of versions we have recorded about an item
+func (s *Store) NVersions(uuid string) (versions int) {
+	for _, l := range s.Log {
+		if l.UUID == uuid {
+			versions++
+		}
+	}
+
+	return versions
+}
+
+// LastUpdated returns the unix nanosecond timestamp for when the entry was
+// updated last. Will be -1 if the entry is not found.
+func (s *Store) LastUpdated(uuid string) (last int64) {
+	last = -1
+
+	for i := len(s.Log) - 1; i >= 0; i-- {
+		if s.Log[i].UUID == uuid {
+			last = s.Log[i].Time
+			break
+		}
+	}
+
+	return last
 }
 
 // merge logs together. The standard case for merging is that the logs proceed
@@ -447,10 +546,6 @@ func applyTx(dst map[string]Entry, tx Tx) error {
 			return err
 		}
 
-		_, ok := entry[tx.Key]
-		if !ok {
-			return fmt.Errorf("%s:%s was not in the entry", tx.UUID, tx.Key)
-		}
 		delete(entry, tx.Key)
 	case TxDeleteList:
 		entry, err := getEntry(dst, tx.UUID)

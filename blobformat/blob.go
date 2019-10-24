@@ -70,7 +70,7 @@ func (b Blob) Deleted() bool {
 func (b Blob) Delete() {
 	b.snapshot()
 	b.touchUpdated()
-	b[KeyDeleted] = time.Now().Unix()
+	b[KeyDeleted] = time.Now().UnixNano()
 }
 
 // Get a specific value. Panics if name is not found. Special keys require the
@@ -195,7 +195,7 @@ func (b Blob) getTimestamp(key string) time.Time {
 		return time.Time{}
 	}
 
-	return time.Unix(integer, 0)
+	return time.Unix(0, integer)
 }
 
 // Snapshot fetches a snapshot of the blob for name where index is
@@ -245,7 +245,7 @@ func (b Blob) NSnapshots() (int, error) {
 
 // touchUpdated refreshes the updated timestamp
 func (b Blob) touchUpdated() {
-	b[KeyUpdated] = time.Now().Unix()
+	b[KeyUpdated] = time.Now().UnixNano()
 }
 
 // addSnapshot adds a new snapshot containing all the current values into

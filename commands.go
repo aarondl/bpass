@@ -62,12 +62,13 @@ func (u *uiContext) addNewInterruptible(name string) error {
 }
 
 func (u *uiContext) addNew(name string) error {
-	for _, v := range u.store {
-		blob := blobformat.Blob(v.(map[string]interface{}))
-		if strings.EqualFold(name, blob.Name()) {
+	newBlob, err := u.store.New(name)
+	if err != nil {
+		if err == blobformat.ErrNameNotUnique {
 			errColor.Printf("%q already exists\n", name)
 			return nil
 		}
+		return err
 	}
 
 	email, err := u.prompt(inputPromptColor.Sprint("email: "))
@@ -85,7 +86,7 @@ func (u *uiContext) addNew(name string) error {
 		return err
 	}
 
-	timestamp := time.Now().Unix()
+	timestamp := time.Now().UnixNano()
 
 	var labels []string
 	infoColor.Println("Add labels, enter blank line to stop")
@@ -105,13 +106,6 @@ func (u *uiContext) addNew(name string) error {
 		}
 
 		labels = append(labels, label)
-	}
-
-	// Here we directly add things as the interface allows so that we can
-	// avoid creating useless snapshots as we create the initial blob
-	newBlob, err := u.store.New(name)
-	if err != nil {
-		return err
 	}
 
 	if len(user) != 0 {
@@ -786,9 +780,7 @@ func (u *uiContext) dump(search string) error {
 		return nil
 	}
 
-	blobIntf := u.store[uuid]
-	blob := blobIntf.(map[string]interface{})
-
+	blob := u.store[uuid]
 	dumpBlob(blob, 0)
 
 	return nil

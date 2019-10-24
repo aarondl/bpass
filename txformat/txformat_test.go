@@ -1,8 +1,13 @@
 package txformat
 
 import (
+	"errors"
+	"math/rand"
 	"reflect"
 	"testing"
+	"time"
+
+	uuidpkg "github.com/gofrs/uuid"
 )
 
 func TestBasic(t *testing.T) {
@@ -402,6 +407,304 @@ func TestMerge(t *testing.T) {
 			t.Errorf("merged differs: %#v", merged)
 		}
 	})
+}
+
+func TestTransactions(t *testing.T) {
+	t.Parallel()
+
+	store := new(Store)
+	store.Begin()
+
+	uuid, err := store.Add()
+	must(t, err)
+	must(t, store.Set(uuid, "test1", "value"))
+	must(t, store.Set(uuid, "test2", "value"))
+
+	if len(store.Log) != 3 {
+		t.Error("should have 3 txs")
+	}
+
+	store.Rollback()
+	if len(store.Log) != 0 {
+		t.Error("should have 0 txs")
+	}
+
+	store.Begin()
+	uuid, err = store.Add()
+	must(t, err)
+	must(t, store.Set(uuid, "test1", "value"))
+	must(t, store.Set(uuid, "test2", "value"))
+
+	if len(store.Log) != 3 {
+		t.Error("should have 3 txs")
+	}
+
+	store.Commit()
+	if len(store.Log) != 3 {
+		t.Error("should have 3 txs")
+	}
+	if store.txPoint != 0 {
+		t.Error("transaction should be ended")
+	}
+}
+
+func TestTransactionsDo(t *testing.T) {
+	t.Parallel()
+
+	store := new(Store)
+
+	err := store.Do(func() error {
+		uuid, err := store.Add()
+		must(t, err)
+		must(t, store.Set(uuid, "test1", "value"))
+		must(t, store.Set(uuid, "test2", "value"))
+
+		must(t, store.UpdateSnapshot())
+		if store.Snapshot == nil {
+			t.Error("snap shot should be updated")
+		}
+
+		return errors.New("fail")
+	})
+	if err == nil {
+		t.Error("should have gotten an error")
+	}
+
+	if store.Snapshot != nil {
+		t.Error("snapshot should have been cleared")
+	}
+	if len(store.Log) != 0 {
+		t.Error("should have 0 txs")
+	}
+
+	err = store.Do(func() error {
+		uuid, err := store.Add()
+		must(t, err)
+		must(t, store.Set(uuid, "test1", "value"))
+		must(t, store.Set(uuid, "test2", "value"))
+
+		return nil
+	})
+	if err != nil {
+		t.Error("should have gotten an error")
+	}
+	if len(store.Log) != 3 {
+		t.Error("should have 3 txs")
+	}
+}
+
+func TestRollbackN(t *testing.T) {
+	t.Parallel()
+
+	store := new(Store)
+	uuid, err := store.Add()
+	must(t, err)
+	must(t, store.Set(uuid, "test1", "value"))
+	must(t, store.Set(uuid, "test2", "value"))
+
+	must(t, store.UpdateSnapshot())
+
+	must(t, store.Set(uuid, "test1", "notvalue"))
+
+	if err := store.RollbackN(5); err == nil {
+		t.Error("expected an error stopping us from rolling back past beginning")
+	}
+
+	must(t, store.RollbackN(1))
+	if len(store.Log) != 3 {
+		t.Error("log should have been truncated by 1 event")
+	}
+	if store.Snapshot == nil {
+		t.Error("it should not have invalidated snapshot")
+	}
+
+	must(t, store.RollbackN(1))
+	if len(store.Log) != 2 {
+		t.Error("log should have been truncated by 1 event")
+	}
+	if store.Snapshot != nil {
+		t.Error("it should have invalidated snapshot")
+	}
+
+	must(t, store.UpdateSnapshot())
+	if got := store.Snapshot[uuid]["test1"].(string); got != "value" {
+		t.Error("the rollback didn't rollback the set, got:", got)
+	}
+	_, ok := store.Snapshot[uuid]["test2"]
+	if ok {
+		t.Error("this key should not be in the snapshot")
+	}
+}
+
+func TestNVersions(t *testing.T) {
+	t.Parallel()
+
+	store := new(Store)
+
+	if store.NVersions("") != 0 {
+		t.Error("it should have no versions")
+	}
+
+	uuid, err := store.Add()
+	must(t, err)
+
+	if store.NVersions(uuid) != 1 {
+		t.Error("it should have 1 version")
+	}
+
+	_, err = store.Add()
+	must(t, err)
+
+	if store.NVersions(uuid) != 1 {
+		t.Error("it should have 1 version")
+	}
+
+	must(t, store.Set(uuid, "test1", "value"))
+
+	if store.NVersions(uuid) != 2 {
+		t.Error("it should have 1 version")
+	}
+}
+
+func TestLastUpdated(t *testing.T) {
+	t.Parallel()
+
+	store := new(Store)
+
+	if store.LastUpdated("") != -1 {
+		t.Error("it should not have been found")
+	}
+
+	uuid, err := store.Add()
+	must(t, err)
+
+	if store.LastUpdated(uuid) > time.Now().UnixNano() {
+		t.Error("it should have been updated at least now ns ago")
+	}
+}
+
+func randomStore() *Store {
+	s := new(Store)
+
+	items := make([]string, 20)
+	for i := range items {
+		uuid, err := s.Add()
+		if err != nil {
+			panic(err)
+		}
+		items[i] = uuid
+	}
+
+	keys := make([]string, 30)
+	for i := range keys {
+		uuid := uuidpkg.Must(uuidpkg.NewV4())
+		keys[i] = uuid.String()
+	}
+
+	arrayKeys := make([]string, 30)
+	for i := range arrayKeys {
+		uuid := uuidpkg.Must(uuidpkg.NewV4())
+		arrayKeys[i] = uuid.String()
+	}
+
+	addedKeys := make(map[string][]string)
+	addedArrayKeys := make(map[string][]string)
+
+	for i := 0; i < 50000; i++ {
+
+		var err error
+	Switch:
+		switch rand.Intn(10) {
+		case 0, 1, 2, 3:
+			item := items[rand.Intn(len(items))]
+			key := keys[rand.Intn(len(keys))]
+			value := uuidpkg.Must(uuidpkg.NewV4()).String()
+
+			err = s.Set(item, key, value)
+
+			akeys, ok := addedKeys[item]
+			if !ok {
+				addedKeys[item] = []string{key}
+				continue
+			}
+
+			for _, a := range akeys {
+				if a == key {
+					break Switch
+				}
+			}
+
+			addedKeys[item] = append(akeys, key)
+		case 4, 5, 6, 7:
+			item := items[rand.Intn(len(items))]
+			key := arrayKeys[rand.Intn(len(arrayKeys))]
+			value := uuidpkg.Must(uuidpkg.NewV4()).String()
+
+			index, err := s.Append(item, key, value)
+			if err != nil {
+				panic(err)
+			}
+
+			indexKey := item + ":" + key
+			akeys, ok := addedArrayKeys[indexKey]
+			if !ok {
+				addedArrayKeys[item] = []string{key}
+				continue
+			}
+
+			for _, a := range akeys {
+				if a == key {
+					break Switch
+				}
+			}
+
+			addedArrayKeys[item+":"+key] = append(akeys, index)
+		case 8:
+			item := items[rand.Intn(len(items))]
+
+			akeys := addedKeys[item]
+			if len(akeys) == 0 {
+				continue
+			}
+			index := rand.Intn(len(akeys))
+			akey := akeys[index]
+			akeys[index], akeys[len(akeys)-1] = akeys[len(akeys)-1], akeys[index]
+			addedKeys[item] = akeys[:len(akeys)-1]
+			err = s.DeleteKey(item, akey)
+		case 9:
+			item := items[rand.Intn(len(items))]
+			key := arrayKeys[rand.Intn(len(arrayKeys))]
+			indexKey := item + ":" + key
+
+			akeys := addedArrayKeys[indexKey]
+			if len(akeys) == 0 {
+				continue
+			}
+			index := rand.Intn(len(akeys))
+			akey := akeys[index]
+			akeys[index], akeys[len(akeys)-1] = akeys[len(akeys)-1], akeys[index]
+			addedArrayKeys[indexKey] = akeys[:len(akeys)-1]
+			err = s.DeleteList(item, key, akey)
+		}
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	return s
+}
+
+func BenchmarkLong(b *testing.B) {
+	s := randomStore()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if err := s.UpdateSnapshot(); err != nil {
+			panic(err)
+		}
+		s.Version = 0
+		s.Snapshot = nil
+	}
 }
 
 func must(t *testing.T, err error) {
