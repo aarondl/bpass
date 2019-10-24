@@ -93,3 +93,17 @@ func (e Entry) List(key string) ([]ListEntry, error) {
 func (e Entry) SetList(key string, list []ListEntry) {
 	e[key] = list
 }
+
+// ListEntryValues returns only the values for a list
+func ListEntryValues(list []ListEntry) []string {
+	if len(list) == 0 {
+		return nil
+	}
+
+	values := make([]string, len(list))
+	for i := range values {
+		values[i] = list[i].Value
+	}
+
+	return values
+}

@@ -360,12 +360,34 @@ func (b Blobs) SetTwofactor(uuid, uriOrKey string) error {
 
 // AddNote to entry.
 func (b Blobs) AddNote(uuid string, note string) (index string, err error) {
+	if err = b.touchUpdated(uuid); err != nil {
+		return "", err
+	}
 	return b.Append(uuid, KeyNotes, note)
+}
+
+// RemoveNote from uuid using the list element's uuid
+func (b Blobs) RemoveNote(uuid string, indexUUID string) (err error) {
+	if err = b.touchUpdated(uuid); err != nil {
+		return err
+	}
+	return b.DeleteList(uuid, KeyNotes, indexUUID)
 }
 
 // AddLabel to entry.
 func (b Blobs) AddLabel(uuid string, label string) (index string, err error) {
+	if err = b.touchUpdated(uuid); err != nil {
+		return "", err
+	}
 	return b.Append(uuid, KeyLabels, label)
+}
+
+// RemoveLabel from uuid using the list element's uuid
+func (b Blobs) RemoveLabel(uuid string, indexUUID string) (err error) {
+	if err = b.touchUpdated(uuid); err != nil {
+		return err
+	}
+	return b.DeleteList(uuid, KeyNotes, indexUUID)
 }
 
 // NewSync creates a new blob with a unique name to have values set on it before

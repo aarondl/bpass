@@ -8,19 +8,26 @@ import (
 )
 
 func (u *uiContext) openurl(search string) error {
-	uuid, ok := u.singleName(search)
-	if !ok {
+	uuid, err := u.findOne(search)
+	if err != nil {
+		return nil
+	}
+	if len(uuid) == 0 {
 		return nil
 	}
 
-	blob := u.store.Get(uuid)
+	blob, err := u.store.Get(uuid)
+	if err != nil {
+		return err
+	}
+
 	link := blob.Get("url")
 	if len(link) == 0 {
 		errColor.Printf("url not set on %s\n", blob.Name())
 		return nil
 	}
 
-	_, err := url.Parse(link)
+	_, err = url.Parse(link)
 	if err != nil {
 		errColor.Printf("url was not a valid url: %v\n", err)
 		return nil

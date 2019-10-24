@@ -10,6 +10,7 @@ import (
 
 	"github.com/aarondl/bpass/crypt"
 	"github.com/aarondl/bpass/txblob"
+	"github.com/aarondl/bpass/txformat"
 
 	"github.com/atotto/clipboard"
 	"github.com/gookit/color"
@@ -61,77 +62,64 @@ func (u *uiContext) addNewInterruptible(name string) error {
 	}
 }
 
-func (u *uiContext) addNew(name string) error {
-	newBlob, err := u.store.New(name)
-	if err != nil {
-		if err == txblob.ErrNameNotUnique {
-			errColor.Printf("%q already exists\n", name)
-			return nil
+func (u *uiContext) addNew(name string) (err error) {
+	return u.store.Do(func() error {
+		uuid, err := u.store.New(name)
+		if err != nil {
+			if err == txblob.ErrNameNotUnique {
+				errColor.Printf("%q already exists\n", name)
+				return nil
+			}
+			return err
 		}
-		return err
-	}
 
-	email, err := u.prompt(inputPromptColor.Sprint("email: "))
-	if err != nil {
-		return err
-	}
-
-	user, err := u.prompt(inputPromptColor.Sprint("user: "))
-	if err != nil {
-		return err
-	}
-
-	pass, err := u.getPassword()
-	if err != nil {
-		return err
-	}
-
-	timestamp := time.Now().UnixNano()
-
-	var labels []string
-	infoColor.Println("Add labels, enter blank line to stop")
-	for {
-		label, err := u.prompt(inputPromptColor.Sprint("label: "))
+		email, err := u.prompt(inputPromptColor.Sprint("email: "))
 		if err != nil {
 			return err
 		}
 
-		if len(label) == 0 {
-			break
+		user, err := u.prompt(inputPromptColor.Sprint("user: "))
+		if err != nil {
+			return err
 		}
 
-		if !validateLabel(labels, label) {
-			errColor.Println("Invalid label")
-			continue
+		pass, err := u.getPassword()
+		if err != nil {
+			return err
 		}
 
-		labels = append(labels, label)
-	}
+		timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
 
-	if len(user) != 0 {
-		newBlob[txblob.KeyUser] = user
-	}
-	if len(email) != 0 {
-		newBlob[txblob.KeyEmail] = email
-	}
-	if len(pass) != 0 {
-		newBlob[txblob.KeyPass] = pass
-	}
-	if len(labels) != 0 {
-		uglyConvert := make([]interface{}, len(labels))
-		for i := range labels {
-			uglyConvert[i] = labels[i]
+		// Use raw sets here to avoid creating history spam based on timestamp
+		// additions
+		if len(user) != 0 {
+			if err = u.store.Store.Set(uuid, txblob.KeyUser, user); err != nil {
+				return err
+			}
 		}
-		newBlob[txblob.KeyLabels] = uglyConvert
-	}
-	newBlob[txblob.KeyUpdated] = timestamp
+		if len(email) != 0 {
+			if err = u.store.Store.Set(uuid, txblob.KeyEmail, email); err != nil {
+				return err
+			}
+		}
+		if len(pass) != 0 {
+			if err = u.store.Store.Set(uuid, txblob.KeyPass, pass); err != nil {
+				return err
+			}
+		}
+		if err = u.store.Store.Set(uuid, txblob.KeyUpdated, timestamp); err != nil {
+			return err
+		}
 
-	// Save the thing
-	return u.store.Add(newBlob)
+		return nil
+	})
 }
 
 func (u *uiContext) rename(src, dst string) error {
-	oldUUID, _ := u.store.Find(src)
+	oldUUID, _, err := u.store.Find(src)
+	if err != nil {
+		return err
+	}
 	if len(oldUUID) == 0 {
 		errColor.Println(src, "does not exist")
 		return nil
@@ -149,7 +137,10 @@ func (u *uiContext) rename(src, dst string) error {
 }
 
 func (u *uiContext) remove(name string) error {
-	uuid, _ := u.store.Find(name)
+	uuid, _, err := u.store.Find(name)
+	if err != nil {
+		return err
+	}
 	if len(uuid) == 0 {
 		errColor.Printf("%q not found\n", name)
 		return nil
@@ -166,7 +157,9 @@ func (u *uiContext) remove(name string) error {
 	}
 
 	if line == name {
-		delete(u.store, name)
+		if err = u.store.Delete(uuid); err != nil {
+			return err
+		}
 		errColor.Println("DELETED", name)
 	} else {
 		errColor.Println("Aborted")
@@ -176,7 +169,10 @@ func (u *uiContext) remove(name string) error {
 }
 
 func (u *uiContext) list(search string) error {
-	entries := u.store.Search(search)
+	entries, err := u.store.Search(search)
+	if err != nil {
+		return err
+	}
 	if len(entries) == 0 {
 		fmt.Println("No entries found")
 		return nil
@@ -188,7 +184,10 @@ func (u *uiContext) list(search string) error {
 }
 
 func (u *uiContext) listByLabels(wantLabels []string) error {
-	results := u.store.SearchLabels(wantLabels...)
+	results, err := u.store.SearchLabels(wantLabels...)
+	if err != nil {
+		return err
+	}
 	if len(results) == 0 {
 		errColor.Println("No entries found")
 		return nil
@@ -201,16 +200,22 @@ func (u *uiContext) listByLabels(wantLabels []string) error {
 }
 
 func (u *uiContext) get(search, key string, index int, copy bool) error {
-	uuid, ok := u.singleName(search)
-	if !ok {
+	uuid, err := u.findOne(search)
+	if err != nil {
+		return nil
+	}
+	if len(uuid) == 0 {
 		return nil
 	}
 
-	entry := u.store.Get(uuid)
+	blob, err := u.store.Get(uuid)
+	if err != nil {
+		return err
+	}
 
 	switch key {
 	case "label", txblob.KeyLabels:
-		labels, err := entry.Labels()
+		labels, err := blob.Labels()
 		if err != nil {
 			errColor.Println("failed to retrieve labels:", err)
 			return nil
@@ -225,21 +230,23 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 			}
 
 			if copy {
-				copyToClipboard(labels[index])
+				copyToClipboard(labels[index].Value)
 			} else {
-				showKeyValue(fmt.Sprintf("label[%d]", index+1), labels[index], 0, 0)
+				showKeyValue(fmt.Sprintf("label[%d]", index+1), labels[index].Value, 0, 0)
 			}
 			return nil
 		}
 
+		labelStrs := txformat.ListEntryValues(labels)
+
 		if copy {
-			copyToClipboard(strings.Join(labels, ","))
+			copyToClipboard(strings.Join(labelStrs, ","))
 		} else {
-			showJoinedSlice("labels", labels, 0, 0)
+			showJoinedSlice("labels", labelStrs, 0, 0)
 		}
 
 	case "note", txblob.KeyNotes:
-		notes, err := entry.Notes()
+		notes, err := blob.Notes()
 		if err != nil {
 			errColor.Println("Failed to retrieve notes:", err)
 			return nil
@@ -254,29 +261,31 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 			}
 
 			if copy {
-				copyToClipboard(notes[index])
+				copyToClipboard(notes[index].Value)
 			} else {
 				showKeyValue(fmt.Sprintf("note[%d]", index+1), "", 0, 0)
-				fmt.Println(notes[index])
+				fmt.Println(notes[index].Value)
 			}
 			return nil
 		}
 
+		noteStrs := txformat.ListEntryValues(notes)
+
 		if copy {
-			copyToClipboard(strings.Join(notes, "\n"))
+			copyToClipboard(strings.Join(noteStrs, "\n"))
 		} else {
-			showNotes(notes, 0, 0)
+			showNotes(noteStrs, 0, 0)
 		}
 
 	case "totp", txblob.KeyTwoFactor:
-		val, err := entry.TwoFactor()
+		val, err := blob.TwoFactor()
 		if err != nil {
 			errColor.Println(err)
 			return nil
 		}
 
 		if len(val) == 0 {
-			errColor.Println("twofactor is not set for", entry.Name())
+			errColor.Println("twofactor is not set for", blob.Name())
 		}
 
 		if copy {
@@ -285,25 +294,25 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 			showKeyValue("totp", val, 0, 0)
 		}
 	case txblob.KeyUpdated:
-		value := entry.Updated().Format(time.RFC3339)
+		value, err := blob.Updated()
+		if err != nil {
+			return err
+		}
+		val := value.Format(time.RFC3339)
 		if copy {
-			copyToClipboard(value)
+			copyToClipboard(val)
 		} else {
-			showKeyValue("updated", value, 0, 0)
+			showKeyValue("updated", val, 0, 0)
 		}
 	case txblob.KeySnapshots:
-		n, err := entry.NSnapshots()
-		if err != nil {
-			errColor.Println(err)
-			return nil
-		}
+		n := u.store.NVersions(uuid)
 		if copy {
 			copyToClipboard(strconv.Itoa(n))
 		} else {
 			showKeyValue("snaps", strconv.Itoa(n), 0, 0)
 		}
 	default:
-		value := entry.Get(key)
+		value := blob.Get(key)
 		if len(value) == 0 {
 			errColor.Printf("Key %s is not set\n", key)
 			return nil
@@ -322,12 +331,18 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 }
 
 func (u *uiContext) set(search, key, value string) error {
-	uuid, ok := u.singleName(search)
-	if !ok {
+	uuid, err := u.findOne(search)
+	if err != nil {
+		return nil
+	}
+	if len(uuid) == 0 {
 		return nil
 	}
 
-	entry := u.store.Get(uuid)
+	blob, err := u.store.Get(uuid)
+	if err != nil {
+		return err
+	}
 
 	if key == txblob.KeyPass {
 		if len(value) == 0 {
@@ -339,8 +354,10 @@ func (u *uiContext) set(search, key, value string) error {
 		}
 
 		if len(value) != 0 {
-			infoColor.Println("Updated password for", entry.Name())
-			u.store.Set(uuid, key, value)
+			if err = u.store.Set(uuid, key, value); err != nil {
+				return err
+			}
+			infoColor.Println("Updated password for", blob.Name())
 		}
 
 		return nil
@@ -348,26 +365,24 @@ func (u *uiContext) set(search, key, value string) error {
 
 	switch key {
 	case "label", txblob.KeyLabels:
-		labels, err := entry.Labels()
+		labels, err := blob.Labels()
 		if err != nil {
 			errColor.Println("Failed to retrieve labels:", err)
 			return nil
 		}
 
-		if !validateLabel(labels, value) {
-			return nil
-		}
-		labels = append(labels, value)
-		u.store.SetLabels(uuid, labels)
-	case "note", txblob.KeyNotes:
-		notes, err := entry.Notes()
-		if err != nil {
-			errColor.Println("Failed to retrieve notes:", err)
-			return nil
-		}
+		labelStrs := txformat.ListEntryValues(labels)
 
-		notes = append(notes, value)
-		u.store.SetNotes(uuid, notes)
+		if !validateLabel(labelStrs, value) {
+			return nil
+		}
+		if _, err = u.store.AddLabel(uuid, value); err != nil {
+			return err
+		}
+	case "note", txblob.KeyNotes:
+		if _, err = u.store.AddNote(uuid, value); err != nil {
+			return err
+		}
 	case "totp", txblob.KeyTwoFactor:
 		if err := u.store.SetTwofactor(uuid, value); err != nil {
 			errColor.Println(err)
@@ -378,7 +393,9 @@ func (u *uiContext) set(search, key, value string) error {
 
 		errColor.Printf("%s cannot be set manually\n", key)
 	default:
-		u.store.Set(uuid, key, value)
+		if err = u.store.Set(uuid, key, value); err != nil {
+			return err
+		}
 	}
 
 	infoColor.Printf("set %s = %s\n", key, value)
@@ -387,8 +404,11 @@ func (u *uiContext) set(search, key, value string) error {
 }
 
 func (u *uiContext) addNote(search string) error {
-	uuid, ok := u.singleName(search)
-	if !ok {
+	uuid, err := u.findOne(search)
+	if err != nil {
+		return nil
+	}
+	if len(uuid) == 0 {
 		return nil
 	}
 
@@ -396,12 +416,9 @@ func (u *uiContext) addNote(search string) error {
 }
 
 func (u *uiContext) addNoteToEntry(uuid string) error {
-	entry := u.store.Get(uuid)
-
-	notes, err := entry.Notes()
+	blob, err := u.store.Get(uuid)
 	if err != nil {
-		errColor.Println("Failed retrieving notes")
-		return nil
+		return err
 	}
 
 	infoColor.Println("Enter note text, two blank lines or ctrl-d to stop")
@@ -431,24 +448,34 @@ func (u *uiContext) addNoteToEntry(uuid string) error {
 		lines = append(lines, line)
 	}
 
-	notes = append(notes, strings.Join(lines, "\n"))
-	u.store.SetNotes(uuid, notes)
-	infoColor.Println("Updated notes for", entry.Name())
+	if _, err := u.store.AddNote(uuid, strings.Join(lines, "\n")); err != nil {
+		return err
+	}
+	infoColor.Println("Updated notes for", blob.Name())
 
 	return nil
 }
 
 func (u *uiContext) addLabels(search string) error {
-	uuid, ok := u.singleName(search)
-	if !ok {
+	uuid, err := u.findOne(search)
+	if err != nil {
 		return nil
 	}
-	entry := u.store.Get(uuid)
-	labels, err := entry.Labels()
+	if len(uuid) == 0 {
+		return nil
+	}
+
+	blob, err := u.store.Get(uuid)
+	if err != nil {
+		return err
+	}
+
+	labels, err := blob.Labels()
 	if err != nil {
 		errColor.Println("Failed retrieving labels")
 		return nil
 	}
+	labelStrs := txformat.ListEntryValues(labels)
 
 	infoColor.Println("Enter labels, blank line or ctrl-d to stop")
 	changed := false
@@ -464,29 +491,37 @@ func (u *uiContext) addLabels(search string) error {
 			break
 		}
 
-		if !validateLabel(labels, line) {
+		if !validateLabel(labelStrs, line) {
 			continue
 		}
 
 		changed = true
-		labels = append(labels, line)
+		if _, err := u.store.AddLabel(uuid, line); err != nil {
+			return err
+		}
 	}
 
 	if changed {
-		infoColor.Println("Updated labels for", entry.Name())
-		u.store.SetLabels(uuid, labels)
+		infoColor.Println("Updated labels for", blob.Name())
 	}
 	return nil
 }
 
 func (u *uiContext) deleteNote(search string, number int) error {
-	uuid, ok := u.singleName(search)
-	if !ok {
+	uuid, err := u.findOne(search)
+	if err != nil {
+		return nil
+	}
+	if len(uuid) == 0 {
 		return nil
 	}
 
-	entry := u.store.Get(uuid)
-	notes, err := entry.Notes()
+	blob, err := u.store.Get(uuid)
+	if err != nil {
+		return err
+	}
+
+	notes, err := blob.Notes()
 	if err != nil {
 		errColor.Println("Failed retrieving notes")
 		return nil
@@ -499,22 +534,29 @@ func (u *uiContext) deleteNote(search string, number int) error {
 		return nil
 	}
 
-	notes[index], notes[len(notes)-1] = notes[len(notes)-1], notes[index]
-	notes = notes[:len(notes)-1]
-	u.store.SetNotes(uuid, notes)
-	infoColor.Println("Updated notes for", entry.Name())
+	if err = u.store.RemoveNote(uuid, notes[index].UUID); err != nil {
+		return err
+	}
+	infoColor.Println("Updated notes for", blob.Name())
 
 	return nil
 }
 
 func (u *uiContext) deleteLabel(search string, label string) error {
-	uuid, ok := u.singleName(search)
-	if !ok {
+	uuid, err := u.findOne(search)
+	if err != nil {
+		return nil
+	}
+	if len(uuid) == 0 {
 		return nil
 	}
 
-	entry := u.store.Get(uuid)
-	labels, err := entry.Labels()
+	blob, err := u.store.Get(uuid)
+	if err != nil {
+		return err
+	}
+
+	labels, err := blob.Labels()
 	if err != nil {
 		errColor.Println("Failed retrieving labels")
 		return nil
@@ -522,7 +564,7 @@ func (u *uiContext) deleteLabel(search string, label string) error {
 
 	index := -1
 	for i, l := range labels {
-		if l == label {
+		if l.Value == label {
 			index = i
 			break
 		}
@@ -533,10 +575,10 @@ func (u *uiContext) deleteLabel(search string, label string) error {
 		return nil
 	}
 
-	labels[index], labels[len(labels)-1] = labels[len(labels)-1], labels[index]
-	labels = labels[:len(labels)-1]
-	u.store.SetLabels(uuid, labels)
-	infoColor.Println("Updated labels for", entry.Name())
+	if err = u.store.RemoveLabel(uuid, labels[index].UUID); err != nil {
+		return err
+	}
+	infoColor.Println("Updated labels for", blob.Name())
 	return nil
 }
 
@@ -640,31 +682,37 @@ func (u *uiContext) getPassword() (string, error) {
 }
 
 func (u *uiContext) show(search string, snapshot int) error {
-	uuid, ok := u.singleName(search)
-	if !ok {
+	uuid, err := u.findOne(search)
+	if err != nil {
 		return nil
 	}
-	entry := u.store.Get(uuid)
-
-	snaps, err := entry.NSnapshots()
-	if err != nil {
-		return fmt.Errorf("failed to get snapshot count: %w", err)
+	if len(uuid) == 0 {
+		return nil
 	}
+
+	blob, err := u.store.Get(uuid)
+	if err != nil {
+		return err
+	}
+
+	snaps := u.store.NVersions(uuid)
 	if snapshot != 0 {
 		if snapshot > snaps {
-			errColor.Printf("%s only has %d snapshots\n", entry.Name(), snaps)
+			errColor.Printf("%s only has %d snapshots\n", blob.Name(), snaps)
 			return nil
 		}
 
-		entry, err = entry.Snapshot(snapshot)
+		entry, err := u.store.EntrySnapshotAt(uuid, snapshot)
 		if err != nil {
 			errColor.Println(err)
 			return nil
 		}
+
+		blob = txblob.Blob(entry)
 	}
 
 	width := 8 // Hardcoded max of the known keys, sad, I know
-	arbitrary := entry.ArbitraryKeys()
+	arbitrary := blob.ArbitraryKeys()
 	// Add back some known keys because we don't give a crap when they're
 	// displayed
 	arbitrary = append(arbitrary,
@@ -681,49 +729,54 @@ func (u *uiContext) show(search string, snapshot int) error {
 	indent := 2
 
 	if snapshot != 0 {
-		showKeyValue(txblob.KeyName, entry.Name(), width, indent)
+		showKeyValue(txblob.KeyName, blob.Name(), width, indent)
 	}
-	showKeyValue(txblob.KeyUser, entry.Get(txblob.KeyUser), width, indent)
-	showKeyValue(txblob.KeyEmail, entry.Get(txblob.KeyEmail), width, indent)
-	showHidden(txblob.KeyPass, entry.Get(txblob.KeyPass), width, indent)
-	t, err := entry.TwoFactor()
+	showKeyValue(txblob.KeyUser, blob.Get(txblob.KeyUser), width, indent)
+	showKeyValue(txblob.KeyEmail, blob.Get(txblob.KeyEmail), width, indent)
+	showHidden(txblob.KeyPass, blob.Get(txblob.KeyPass), width, indent)
+	t, err := blob.TwoFactor()
 	if err != nil {
 		fmt.Println("Error retrieving two factor:", err)
 	} else if len(t) != 0 {
 		showKeyValue("totp", t, width, indent)
 	}
 
-	labels, err := entry.Labels()
+	labels, err := blob.Labels()
 	if err != nil {
 		fmt.Println("Error fetching labels:", err)
 	} else if len(labels) > 0 {
-		showJoinedSlice("labels", labels, width, indent)
+		labelStrs := txformat.ListEntryValues(labels)
+		showJoinedSlice("labels", labelStrs, width, indent)
 	}
 
-	notes, err := entry.Notes()
+	notes, err := blob.Notes()
 	if err != nil {
 		fmt.Println("Error retrieving notes:", err)
 	} else if len(notes) > 0 {
-		showNotes(notes, width, indent)
+		noteStrs := txformat.ListEntryValues(notes)
+		showNotes(noteStrs, width, indent)
 	}
 
-	syncs, err := entry.Sync()
+	syncs, err := blob.Sync()
 	if err != nil {
 		fmt.Println("Error retrieving syncs:", err)
 	} else if len(syncs) > 0 {
-		showJoinedSlice("sync", syncs, width, indent)
+		syncStrs := txformat.ListEntryValues(syncs)
+		showJoinedSlice("sync", syncStrs, width, indent)
 	}
 
 	sort.Strings(arbitrary)
 	for _, k := range arbitrary {
-		val := entry.Get(k)
+		val := blob.Get(k)
 		if len(val) == 0 {
 			continue
 		}
 		showKeyValue(k, val, width, indent)
 	}
 
-	if update := entry.Updated(); !update.IsZero() {
+	if update, err := blob.Updated(); err != nil {
+		return err
+	} else if !update.IsZero() {
 		showKeyValue("updated", update.Format(time.RFC3339), width, indent)
 	}
 
@@ -775,12 +828,18 @@ func showNote(number int, note string, indent int) {
 }
 
 func (u *uiContext) dump(search string) error {
-	uuid, ok := u.singleName(search)
-	if !ok {
+	uuid, err := u.findOne(search)
+	if err != nil {
+		return nil
+	}
+	if len(uuid) == 0 {
 		return nil
 	}
 
-	blob := u.store[uuid]
+	blob, err := u.store.Get(uuid)
+	if err != nil {
+		return err
+	}
 	dumpBlob(blob, 0)
 
 	return nil

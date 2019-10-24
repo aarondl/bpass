@@ -8,10 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
-	"github.com/atotto/clipboard"
+	"github.com/aarondl/bpass/txblob"
+	"github.com/aarondl/bpass/txformat"
 
+	"github.com/atotto/clipboard"
 	"github.com/gookit/color"
 )
 
@@ -22,7 +23,7 @@ type uiContext struct {
 	shortFilename string
 
 	// Decrypted and decoded storage
-	store blobformat.Blobs
+	store txblob.Blobs
 	// for later encryption
 	key  []byte
 	salt []byte
@@ -149,9 +150,12 @@ func (u *uiContext) loadBlob() error {
 			return err
 		}
 
-		if u.store, err = blobformat.New(pt); err != nil {
+		store, err := txformat.New(pt)
+		if err != nil {
 			return err
 		}
+
+		u.store = txblob.Blobs{Store: store}
 	}
 
 	// Derive a new key from the password for later encryption
@@ -161,8 +165,8 @@ func (u *uiContext) loadBlob() error {
 	}
 
 	// It's possible the store was empty/null even on a load, just create it
-	if u.store == nil {
-		u.store = make(blobformat.Blobs)
+	if u.store.Store == nil {
+		u.store = txblob.Blobs{Store: new(txformat.Store)}
 	}
 
 	return nil

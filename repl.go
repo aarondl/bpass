@@ -138,8 +138,12 @@ func (r *repl) run() error {
 			case 0:
 				r.prompt = promptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 			case 1:
-				name, ok := r.ctx.singleName(splits[0])
-				if !ok {
+				var name string
+				name, err = r.ctx.findOne(splits[0])
+				if err != nil {
+					return err
+				}
+				if len(name) == 0 {
 					continue
 				}
 				r.ctxEntry = name
@@ -416,14 +420,18 @@ func (u *uiContext) prompt(prompt string) (string, error) {
 	return line, nil
 }
 
-// singleName returns false iff it printed an error message to the user, true
-// if it found a uuid
-func (u *uiContext) singleName(search string) (string, bool) {
-	entries := u.store.Search(search)
+// findOne returns a uuid iff a single one could be found, else an error
+// message will have been printed to the user.
+func (u *uiContext) findOne(search string) (string, error) {
+	entries, err := u.store.Search(search)
+	if err != nil {
+		return "", err
+	}
+
 	switch len(entries) {
 	case 0:
 		errColor.Printf("No matches for search (%q)\n", search)
-		return "", false
+		return "", nil
 	case 1:
 		ids := entries.UUIDs()
 		id := ids[0]
@@ -432,7 +440,7 @@ func (u *uiContext) singleName(search string) (string, bool) {
 			infoColor.Printf("using: %s\n", name)
 		}
 
-		return id, true
+		return id, nil
 	}
 
 	names := entries.Names()
@@ -441,7 +449,7 @@ func (u *uiContext) singleName(search string) (string, bool) {
 	fmt.Print("\n  ")
 	fmt.Println(strings.Join(names, "\n  "))
 
-	return "", false
+	return "", nil
 }
 
 // getString ensures a non-empty string
