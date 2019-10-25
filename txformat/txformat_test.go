@@ -213,7 +213,7 @@ func TestMerge(t *testing.T) {
 			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
 		}
 
-		merged, conflicts := merge(logA, logB, nil)
+		merged, conflicts := Merge(logA, logB, nil)
 		if len(conflicts) != 0 {
 			t.Errorf("conflicts should be empty: %#v", conflicts)
 		}
@@ -235,7 +235,7 @@ func TestMerge(t *testing.T) {
 			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
 		}
 
-		merged, conflicts := merge(logA, logB, nil)
+		merged, conflicts := Merge(logA, logB, nil)
 		if len(conflicts) != 0 {
 			t.Errorf("conflicts should be empty: %#v", conflicts)
 		}
@@ -268,7 +268,7 @@ func TestMerge(t *testing.T) {
 			{ID: "6", Time: 5 /* intentional */, Kind: TxAdd, UUID: "6"},
 		}
 
-		merged, conflicts := merge(logA, logB, nil)
+		merged, conflicts := Merge(logA, logB, nil)
 		if len(conflicts) != 0 {
 			t.Errorf("conflicts should be empty: %#v", conflicts)
 		}
@@ -292,7 +292,7 @@ func TestMerge(t *testing.T) {
 			{ID: "2", Time: 2, Kind: TxDelete, UUID: "1"},
 		}
 
-		merged, conflicts := merge(logA, logB, nil)
+		merged, conflicts := Merge(logA, logB, nil)
 		if len(merged) != 0 {
 			t.Error("merged should not be returned")
 		}
@@ -316,7 +316,7 @@ func TestMerge(t *testing.T) {
 		copy(deletem, conflicts)
 
 		restore[0].Restore()
-		merged, conflicts = merge(logA, logB, restore)
+		merged, conflicts = Merge(logA, logB, restore)
 		if len(conflicts) != 0 {
 			t.Errorf("conflicts should be empty: %#v", conflicts)
 		}
@@ -325,7 +325,7 @@ func TestMerge(t *testing.T) {
 		}
 
 		deletem[0].Delete()
-		merged, conflicts = merge(logA, logB, deletem)
+		merged, conflicts = Merge(logA, logB, deletem)
 		if len(conflicts) != 0 {
 			t.Errorf("conflicts should be empty: %#v", conflicts)
 		}
@@ -359,7 +359,7 @@ func TestMerge(t *testing.T) {
 			{ID: "4", Time: 4, Kind: TxDelete, UUID: "2"},
 		}
 
-		merged, conflicts := merge(logA, logB, nil)
+		merged, conflicts := Merge(logA, logB, nil)
 		if len(merged) != 0 {
 			t.Error("merged should not be returned")
 		}
@@ -388,7 +388,7 @@ func TestMerge(t *testing.T) {
 		for i := range restore {
 			restore[i].Restore()
 		}
-		merged, conflicts = merge(logA, logB, restore)
+		merged, conflicts = Merge(logA, logB, restore)
 		if len(conflicts) != 0 {
 			t.Errorf("conflicts should be empty: %#v", conflicts)
 		}
@@ -399,7 +399,7 @@ func TestMerge(t *testing.T) {
 		for i := range restore {
 			deletem[i].Delete()
 		}
-		merged, conflicts = merge(logA, logB, deletem)
+		merged, conflicts = Merge(logA, logB, deletem)
 		if len(conflicts) != 0 {
 			t.Errorf("conflicts should be empty: %#v", conflicts)
 		}
@@ -702,8 +702,7 @@ func BenchmarkLong(b *testing.B) {
 		if err := s.UpdateSnapshot(); err != nil {
 			panic(err)
 		}
-		s.Version = 0
-		s.Snapshot = nil
+		s.ResetSnapshot()
 	}
 }
 

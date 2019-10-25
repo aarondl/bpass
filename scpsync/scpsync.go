@@ -104,7 +104,7 @@ func Recv(hostport string, config *ssh.ClientConfig, filename string) (content [
 	var file scpFile
 	file, err = readFile(stream)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read file: %w", err)
+		return nil, err
 	}
 
 	if err = write.Close(); err != nil {
@@ -162,11 +162,11 @@ func Send(hostport string, config *ssh.ClientConfig, filename string, mode int, 
 
 	err = sendFile(stream, bytes.NewReader(contents), filename, int64(len(contents)), mode)
 	if err != nil {
-		return
+		return err
 	}
 
 	if err = write.Close(); err != nil {
-		return
+		return err
 	}
 
 	if err = session.Wait(); err != nil {
@@ -192,9 +192,9 @@ type Err struct {
 
 // Error interface
 func (e Err) Error() string {
-	errStr := fmt.Sprintf("error code %d from scp", e.Code)
+	errStr := fmt.Sprintf("error code %d", e.Code)
 	if len(e.Msg) != 0 {
-		errStr += ": " + e.Msg
+		errStr += " (" + e.Msg + ")"
 	}
 	return errStr
 }
@@ -229,7 +229,6 @@ func readFile(stream io.ReadWriter) (file scpFile, err error) {
 	}
 
 	reader := bufio.NewReader(stream)
-
 	str, err := reader.ReadString('\n')
 	if err != nil {
 		return file, fmt.Errorf("failed to read intitial file header: %w", err)
@@ -237,12 +236,12 @@ func readFile(stream io.ReadWriter) (file scpFile, err error) {
 		return file, errors.New("empty request")
 	}
 
-	// Acknowledge we've received the initial header
-	if err = sendOKResponse(stream); err != nil {
-		return file, err
-	}
-
-	if str[0] != 'C' {
+	switch str[0] {
+	case 'C':
+		// This is a happy case, let it go
+	case 1, 2:
+		return file, Err{Code: int(str[0]), Msg: str[1:]}
+	default:
 		return file, fmt.Errorf("want initial character C but got: %c", str[0])
 	}
 
@@ -263,11 +262,16 @@ func readFile(stream io.ReadWriter) (file scpFile, err error) {
 		return file, fmt.Errorf("failed to parse the length: %q (%w)", fields[1], err)
 	}
 
+	// Acknowledge we've received the initial header
+	if err = sendOKResponse(stream); err != nil {
+		return file, err
+	}
+
 	file.Contents = make([]byte, length+1)
-	if n, err := reader.Read(file.Contents); err != nil {
+	if n, err := io.ReadFull(reader, file.Contents); err != nil {
 		return file, err
 	} else if int64(n) != length+1 {
-		return file, fmt.Errorf("short read, want %d bytes but got %d", length, n)
+		return file, fmt.Errorf("short read, want %d bytes but got %d", length+1, n)
 	}
 
 	if file.Contents[len(file.Contents)-1] != 0 {
@@ -316,4 +320,16 @@ func readResponse(stream io.Reader) error {
 	default:
 		return fmt.Errorf("unknown response from scp: %x", response[:nRead])
 	}
+}
+
+// IsNotFoundErr checks to see if the error was a file not found error
+// from the server.
+func IsNotFoundErr(err error) bool {
+	e, ok := err.(Err)
+	if !ok {
+		return false
+	}
+
+	return e.Code == 1 &&
+		strings.Contains(strings.ToLower(e.Msg), "no such file or directory")
 }

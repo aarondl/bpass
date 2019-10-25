@@ -18,13 +18,15 @@ const (
 	KeyLabels    = "labels"
 
 	// Synchronization keys in user data
-	KeySync     = "sync"
-	KeySecret   = "secretkey"
-	KeyPub      = "pubkey"
-	KeyHost     = "host"
-	KeyPort     = "port"
-	KeyPath     = "path"
-	KeyLastSync = "lastsync"
+	KeySync       = "sync"
+	KeySyncKind   = "synckind"
+	KeySecret     = "secretkey"
+	KeyPub        = "pubkey"
+	KeyHost       = "host"
+	KeyPort       = "port"
+	KeyPath       = "path"
+	KeyKnownHosts = "knownhosts"
+	KeyLastSync   = "lastsync"
 )
 
 const (
@@ -48,11 +50,13 @@ var (
 		KeyLabels,
 
 		KeySync,
+		KeySyncKind,
 		KeySecret,
 		KeyPub,
 		KeyHost,
 		KeyPort,
 		KeyPath,
+		KeyKnownHosts,
 		KeyLastSync,
 	}
 

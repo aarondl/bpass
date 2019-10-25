@@ -210,6 +210,37 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 	}
 
 	switch key {
+	case txblob.KeySync:
+		syncs, err := blob.Sync()
+		if err != nil {
+			errColor.Println("failed to retrieve labels:", err)
+			return nil
+		}
+
+		// Single label
+		if index > 0 {
+			index--
+			if index >= len(syncs) {
+				errColor.Printf("There is only %d sync items\n", len(syncs))
+				return nil
+			}
+
+			if copy {
+				copyToClipboard(syncs[index].Value)
+			} else {
+				showKeyValue(fmt.Sprintf("sync[%d]", index+1), syncs[index].Value, 0, 0)
+			}
+			return nil
+		}
+
+		syncStrs := txformat.ListEntryValues(syncs)
+
+		if copy {
+			copyToClipboard(strings.Join(syncStrs, ","))
+		} else {
+			showJoinedSlice("sync", syncStrs, 0, 0)
+		}
+
 	case "label", txblob.KeyLabels:
 		labels, err := blob.Labels()
 		if err != nil {
@@ -712,6 +743,7 @@ func (u *uiContext) show(search string, snapshot int) error {
 	// Add back some known keys because we don't give a crap when they're
 	// displayed
 	arbitrary = append(arbitrary,
+		txblob.KeySyncKind,
 		txblob.KeyPub,
 		txblob.KeyPath,
 		txblob.KeyHost,

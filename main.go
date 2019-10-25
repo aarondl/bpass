@@ -24,7 +24,9 @@ type uiContext struct {
 
 	// Decrypted and decoded storage
 	store txblob.Blobs
-	// for later encryption
+	// save key + salt for encrypting later
+	// save password for decrypting sync'd copies
+	pass string
 	key  []byte
 	salt []byte
 }
@@ -149,6 +151,8 @@ func (u *uiContext) loadBlob() error {
 		if err != nil {
 			return err
 		}
+
+		u.pass = pwd
 
 		store, err := txformat.New(pt)
 		if err != nil {

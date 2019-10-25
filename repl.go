@@ -375,7 +375,7 @@ func (r *repl) run() error {
 			err = r.ctx.show(name, snapshot)
 		case "sync":
 			if len(splits) == 0 {
-				err = r.ctx.sync()
+				err = r.ctx.sync(false, true)
 			} else {
 				kind := splits[1]
 				switch splits[0] {

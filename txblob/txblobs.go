@@ -426,8 +426,6 @@ func (b Blobs) AddSync(uuid string) error {
 		if err != nil {
 			return err
 		}
-
-		return err
 	} else {
 		list, err := blob.Sync()
 		if err != nil {
@@ -443,7 +441,7 @@ func (b Blobs) AddSync(uuid string) error {
 	}
 
 	_, err = b.Store.Append(masterUUID, KeySync, uuid)
-	return nil
+	return err
 }
 
 // RemoveSync removes a synchronization key from the list of master syncs.

@@ -57,14 +57,14 @@ func New(data []byte) (*Store, error) {
 	return s, nil
 }
 
-// NewLogOnly does not retrieve the version or snapshot
-func NewLogOnly(data []byte) (*Store, error) {
+// NewLog parses the same data as New() but only returns the log
+func NewLog(data []byte) ([]Tx, error) {
 	s := new(storeNoSnapshot)
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, err
 	}
 
-	return &Store{Log: s.Log}, nil
+	return s.Log, nil
 }
 
 // Save marshals as json blob
@@ -200,8 +200,7 @@ func (s *Store) Rollback() {
 	}
 
 	if s.Version > uint(s.txPoint) {
-		s.Version = 0
-		s.Snapshot = nil
+		s.ResetSnapshot()
 	}
 
 	s.Log = s.Log[:s.txPoint-1]
@@ -234,13 +233,18 @@ func (s *Store) RollbackN(n uint) error {
 	}
 
 	if s.Version > ln-n {
-		s.Version = 0
-		s.Snapshot = nil
+		s.ResetSnapshot()
 	}
 
 	s.Log = s.Log[:ln-n]
 
 	return nil
+}
+
+// ResetSnapshot clears the current snapshot out of memory
+func (s *Store) ResetSnapshot() {
+	s.Version = 0
+	s.Snapshot = nil
 }
 
 // UpdateSnapshot applies all outstanding transactions in the log to the
@@ -344,7 +348,7 @@ func (s *Store) LastUpdated(uuid string) (last int64) {
 	return last
 }
 
-// merge logs together. The standard case for merging is that the logs proceed
+// Merge logs together. The standard case for merging is that the logs proceed
 // in order with the same uuids.
 //
 // There is a no-fork fast-path in which a is returned if lengths are the same
@@ -361,7 +365,7 @@ func (s *Store) LastUpdated(uuid string) (last int64) {
 //
 // If conflicts have not been resolved the same set of conflicts will simply
 // be returned.
-func merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
+func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 	for _, r := range resolved {
 		if r.resolution == conflictNone {
 			return nil, resolved

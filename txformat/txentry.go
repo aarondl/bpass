@@ -9,8 +9,8 @@ type Entry map[string]interface{}
 // ListEntry is the way arrays are stored. It's done this way so that each
 // entry has a specific uuid to make appends/deletes easy to reconcile.
 type ListEntry struct {
-	UUID  string
-	Value string
+	UUID  string `msgpack:"uuid" json:"uuid"`
+	Value string `msgpack:"value" json:"value"`
 }
 
 // String returns the key's value as a string, an error occurs if the key
@@ -55,11 +55,11 @@ func (e Entry) List(key string) ([]ListEntry, error) {
 			case map[string]interface{}:
 				uuidIntf, ok := gotElem["uuid"]
 				if !ok {
-					return nil, fmt.Errorf("%s[%d] list element uuid key does not exist: %T", key, i, gotElem)
+					return nil, fmt.Errorf(`%s[%d] list element "uuid" key does not exist: %T`, key, i, gotElem)
 				}
 				valIntf, ok := gotElem["value"]
 				if !ok {
-					return nil, fmt.Errorf("%s[%d] list element value key does not exist: %T", key, i, gotElem)
+					return nil, fmt.Errorf(`%s[%d] list element "value" key does not exist: %T`, key, i, gotElem)
 				}
 
 				uuid, ok := uuidIntf.(string)
