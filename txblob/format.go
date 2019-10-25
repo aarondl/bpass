@@ -57,12 +57,21 @@ var (
 		KeyPort,
 		KeyPath,
 		KeyKnownHosts,
-		KeyLastSync,
 	}
 
 	// protectedKeys is a list of keys that cannot be set to a string value
 	protectedKeys = []string{
-		KeyTwoFactor, KeyNotes, KeyUpdated, KeyLabels, KeySnapshots,
-		KeySync, KeyLastSync,
+		// Special setters
+		KeyTwoFactor,
+
+		// Forbidden
+		KeyName,
+		KeySnapshots,
+
+		// Dates
+		KeyUpdated,
+
+		// Slices
+		KeyNotes, KeyLabels, KeySync, KeyKnownHosts,
 	}
 )

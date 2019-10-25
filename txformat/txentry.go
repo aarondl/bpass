@@ -13,6 +13,31 @@ type ListEntry struct {
 	Value string `msgpack:"value" json:"value"`
 }
 
+// EntryKind of a key
+type EntryKind string
+
+// EntryKinds
+const (
+	EntryKindString = "string"
+	EntryKindList   = "list"
+)
+
+// Kind of key, returns false if key is not found
+func (e Entry) Kind(key string) (kind EntryKind, ok bool) {
+	v, ok := e[key]
+	if !ok {
+		return kind, false
+	}
+
+	_, ok = v.(string)
+	if ok {
+		return EntryKindString, false
+	}
+
+	// If it's not a string it must be list currently
+	return EntryKindList, true
+}
+
 // String returns the key's value as a string, an error occurs if the key
 // was not found or of wrong type.
 func (e Entry) String(key string) (string, error) {

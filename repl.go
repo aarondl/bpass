@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/aarondl/bpass/blobformat"
+	"github.com/aarondl/bpass/txblob"
 
 	"github.com/gookit/color"
 )
@@ -24,12 +25,15 @@ var replHelp = `Commands:
 CD aware commands (omit name|search when cd'd into entry):
  show <search> [snapshot]    - Dump the entire entry (optionally at a specific snapshot)
  set  <search> <key> <value> - Set a value on an entry (set pass can omit value to use generator)
- get  <search> <key> [index] - Show a specific part of an entry (notes/labels can use index)
- cp   <search> <key> [index] - Copy a specific part of an entry to the clipboard
+ get  <search> <key> [index] - Show a specific part of an entry (lists can use index)
+ cp   <search> <key> [index] - Copy a specific part of an entry to the clipboard (lists can use index)
  open <search>               - Open url key using the browser (linux only atm, xdg-open shell out)
 
+ rmk <search> <key>          - Delete a key from an entry
+ rml <search> <key> <index>  - Delete an item from a list at index
+
  note    <search>            - Add a note
- rmnote  <search> <index>    - Delete a note
+ rmnote  <search> <index>    - Delete a note (alias: rml <search> notes <index>)
  label   <search>            - Add labels
  rmlabel <search> <label>    - Remove a label
 
@@ -42,7 +46,7 @@ Clipboard copy shortcuts (equivalent to cp name CMD):
 Sync commands:
  sync              - Synchronize the file with all sources (pull, merge, push)
  sync add <ssh>    - Add an automatic synchronization option
- sync rm  <name>   - Removes automatic synchronization (use rm to delete sync entries permanently)
+ sync rm  <name>   - Removes automatic synchronization (alias: rml sync/master sync <index>)
 
 Debug commands:
  dump <search>     - Dumps an entire entry in debug mode
@@ -120,12 +124,49 @@ func (r *repl) run() error {
 				continue
 			}
 			name := splits[0]
-			err = r.ctx.remove(name)
+			err = r.ctx.deleteEntry(name)
 
 			if err == nil && r.ctxEntry == name {
 				r.ctxEntry = ""
 				r.prompt = promptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 			}
+
+		case "rmk":
+			name := r.ctxEntry
+			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
+				errColor.Println("syntax: rmk <search> <key>")
+				continue
+			}
+
+			if len(name) == 0 {
+				name = splits[0]
+				splits = splits[1:]
+			}
+
+			err = r.ctx.deleteKey(name, splits[0])
+
+		case "rml":
+			name := r.ctxEntry
+			if len(splits) < 2 || (len(name) == 0 && len(splits) < 3) {
+				errColor.Println("syntax: rml <search> <key> <index>\n")
+				continue
+			}
+
+			if len(name) == 0 {
+				name = splits[0]
+				splits = splits[1:]
+			}
+
+			key := splits[0]
+			splits = splits[1:]
+
+			number, err := strconv.Atoi(splits[0])
+			if err != nil {
+				errColor.Printf("%q is not a number\n", splits[0])
+				continue
+			}
+
+			err = r.ctx.deleteList(name, key, number)
 
 		case "ls":
 			search := ""
@@ -316,7 +357,7 @@ func (r *repl) run() error {
 				continue
 			}
 
-			err = r.ctx.deleteNote(name, number)
+			err = r.ctx.deleteList(name, txblob.KeyNotes, number)
 
 		case "label":
 			name := r.ctxEntry

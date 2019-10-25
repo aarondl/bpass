@@ -55,9 +55,8 @@ func (b Blob) Name() string {
 // Get a specific value. Panics if name is not found. Special keys require the
 // use of specific getters: labels, notes, twofactor, updated etc.
 func (b Blob) Get(key string) string {
-	key = strings.ToLower(key)
 	for _, p := range protectedKeys {
-		if key == p {
+		if strings.EqualFold(key, p) {
 			panic(fmt.Sprintf("key %s cannot be retrieved with Get()", p))
 		}
 	}

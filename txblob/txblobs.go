@@ -17,7 +17,21 @@ import (
 // Sentinel errors
 var (
 	ErrNameNotUnique = errors.New("name is not unique")
+	ErrKeyNotAllowed = errors.New("key is not allowed")
 )
+
+type keyNotAllowed string
+
+func (k keyNotAllowed) Error() string {
+	return fmt.Sprintf("%q may not be set", k)
+}
+
+// IsKeyNotAllowed checks if the error is a key error (some keys cannot
+// be altered by humans)
+func IsKeyNotAllowed(err error) bool {
+	_, ok := err.(keyNotAllowed)
+	return ok
+}
 
 // Blobs exposes operations on special keys in the blob file structure
 // All manipulation should be done via this interface or special keys like
@@ -182,9 +196,10 @@ func (b Blobs) Find(name string) (string, Blob, error) {
 	return "", nil, nil
 }
 
-// FindByUUID returns nil if it does not find the
-// object searched for. Error does not occur unless something unexpected
-// happened.
+// FindByUUID returns nil if it does not find the object searched for.
+// Error does not occur unless something unexpected happened. This is slightly
+// useful because it calls UpdateSnapshot for you which does not happen
+// when accessing the map directly.
 func (b Blobs) FindByUUID(uuid string) (Blob, error) {
 	if err := b.UpdateSnapshot(); err != nil {
 		return nil, err
@@ -305,13 +320,13 @@ func (b Blobs) Rename(uuid, newName string) error {
 }
 
 // Set the key in name to value, properly updates 'updated' and 'snapshots'.
-// If the key is value with special meaning it will panic. To update
-// things like: labels, notes, twofactor, updated you must use the specific
-// setters.
+// returns keyNotAllowed error if a protected key is attempted to be set.
+// To update protected keys like: labels, notes, twofactor, updated you must
+// use the specific setters.
 func (b Blobs) Set(uuid, key, value string) error {
 	for _, p := range protectedKeys {
 		if strings.EqualFold(key, p) {
-			panic(fmt.Sprintf("key %s cannot be set with Set()", p))
+			return keyNotAllowed(key)
 		}
 	}
 
@@ -319,6 +334,19 @@ func (b Blobs) Set(uuid, key, value string) error {
 		return err
 	}
 	return b.Store.Set(uuid, key, value)
+}
+
+// DeleteKey from an entry, follows the rules of Set() for protected keys.
+func (b Blobs) DeleteKey(uuid, key string) error {
+	switch key {
+	case KeyName, KeyUpdated:
+		return keyNotAllowed(key)
+	}
+
+	if err := b.touchUpdated(uuid); err != nil {
+		return err
+	}
+	return b.Store.DeleteKey(uuid, key)
 }
 
 // SetTwofactor loads the totpURL to ensure it contains a totp secret key
@@ -359,23 +387,23 @@ func (b Blobs) SetTwofactor(uuid, uriOrKey string) error {
 }
 
 // AddNote to entry.
-func (b Blobs) AddNote(uuid string, note string) (index string, err error) {
+func (b Blobs) AddNote(uuid, note string) (index string, err error) {
 	if err = b.touchUpdated(uuid); err != nil {
 		return "", err
 	}
 	return b.Append(uuid, KeyNotes, note)
 }
 
-// RemoveNote from uuid using the list element's uuid
-func (b Blobs) RemoveNote(uuid string, indexUUID string) (err error) {
+// RemoveList deletes index from uuid.key
+func (b Blobs) RemoveList(uuid, key, indexUUID string) (err error) {
 	if err = b.touchUpdated(uuid); err != nil {
 		return err
 	}
-	return b.DeleteList(uuid, KeyNotes, indexUUID)
+	return b.DeleteList(uuid, key, indexUUID)
 }
 
 // AddLabel to entry.
-func (b Blobs) AddLabel(uuid string, label string) (index string, err error) {
+func (b Blobs) AddLabel(uuid, label string) (index string, err error) {
 	if err = b.touchUpdated(uuid); err != nil {
 		return "", err
 	}
@@ -383,7 +411,7 @@ func (b Blobs) AddLabel(uuid string, label string) (index string, err error) {
 }
 
 // RemoveLabel from uuid using the list element's uuid
-func (b Blobs) RemoveLabel(uuid string, indexUUID string) (err error) {
+func (b Blobs) RemoveLabel(uuid, indexUUID string) (err error) {
 	if err = b.touchUpdated(uuid); err != nil {
 		return err
 	}

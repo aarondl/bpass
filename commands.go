@@ -132,7 +132,7 @@ func (u *uiContext) rename(src, dst string) error {
 	return nil
 }
 
-func (u *uiContext) remove(name string) error {
+func (u *uiContext) deleteEntry(name string) error {
 	uuid, _, err := u.store.Find(name)
 	if err != nil {
 		return err
@@ -161,6 +161,33 @@ func (u *uiContext) remove(name string) error {
 		errColor.Println("Aborted")
 	}
 
+	return nil
+}
+
+func (u *uiContext) deleteKey(search, key string) error {
+	uuid, err := u.findOne(search)
+	if err != nil {
+		return err
+	}
+	if len(uuid) == 0 {
+		return nil
+	}
+
+	blob, err := u.store.Get(uuid)
+	if err != nil {
+		return err
+	}
+
+	_, ok := blob[key]
+	if ok {
+		err := u.store.DeleteKey(uuid, key)
+		if txblob.IsKeyNotAllowed(err) {
+			errColor.Println(key, "may not be deleted")
+			return nil
+		}
+	}
+
+	infoColor.Println("deleted", key)
 	return nil
 }
 
@@ -210,100 +237,6 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 	}
 
 	switch key {
-	case txblob.KeySync:
-		syncs, err := blob.Sync()
-		if err != nil {
-			errColor.Println("failed to retrieve labels:", err)
-			return nil
-		}
-
-		// Single label
-		if index > 0 {
-			index--
-			if index >= len(syncs) {
-				errColor.Printf("There is only %d sync items\n", len(syncs))
-				return nil
-			}
-
-			if copy {
-				copyToClipboard(syncs[index].Value)
-			} else {
-				showKeyValue(fmt.Sprintf("sync[%d]", index+1), syncs[index].Value, 0, 0)
-			}
-			return nil
-		}
-
-		syncStrs := txformat.ListEntryValues(syncs)
-
-		if copy {
-			copyToClipboard(strings.Join(syncStrs, ","))
-		} else {
-			showJoinedSlice("sync", syncStrs, 0, 0)
-		}
-
-	case "label", txblob.KeyLabels:
-		labels, err := blob.Labels()
-		if err != nil {
-			errColor.Println("failed to retrieve labels:", err)
-			return nil
-		}
-
-		// Single label
-		if index > 0 {
-			index--
-			if index >= len(labels) {
-				errColor.Printf("There is only %d labels\n", len(labels))
-				return nil
-			}
-
-			if copy {
-				copyToClipboard(labels[index].Value)
-			} else {
-				showKeyValue(fmt.Sprintf("label[%d]", index+1), labels[index].Value, 0, 0)
-			}
-			return nil
-		}
-
-		labelStrs := txformat.ListEntryValues(labels)
-
-		if copy {
-			copyToClipboard(strings.Join(labelStrs, ","))
-		} else {
-			showJoinedSlice("labels", labelStrs, 0, 0)
-		}
-
-	case "note", txblob.KeyNotes:
-		notes, err := blob.Notes()
-		if err != nil {
-			errColor.Println("Failed to retrieve notes:", err)
-			return nil
-		}
-
-		// Single note
-		if index > 0 {
-			index--
-			if index >= len(notes) {
-				errColor.Printf("There are only %d notes\n", len(notes))
-				return nil
-			}
-
-			if copy {
-				copyToClipboard(notes[index].Value)
-			} else {
-				showKeyValue(fmt.Sprintf("note[%d]", index+1), "", 0, 0)
-				fmt.Println(notes[index].Value)
-			}
-			return nil
-		}
-
-		noteStrs := txformat.ListEntryValues(notes)
-
-		if copy {
-			copyToClipboard(strings.Join(noteStrs, "\n"))
-		} else {
-			showNotes(noteStrs, 0, 0)
-		}
-
 	case "totp", txblob.KeyTwoFactor:
 		val, err := blob.TwoFactor()
 		if err != nil {
@@ -339,18 +272,64 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 			showKeyValue("snaps", strconv.Itoa(n), 0, 0)
 		}
 	default:
-		value := blob.Get(key)
-		if len(value) == 0 {
+		entry := txformat.Entry(blob)
+		kind, ok := entry.Kind(key)
+		if !ok {
 			errColor.Printf("Key %s is not set\n", key)
 			return nil
 		}
 
-		if copy {
-			copyToClipboard(value)
-		} else if key == txblob.KeyPass {
-			showHidden(key, value, 0, 0)
-		} else {
-			showKeyValue(key, value, 0, 0)
+		switch kind {
+		case txformat.EntryKindString:
+			value, err := entry.String(key)
+			if err != nil {
+				return err
+			}
+
+			if copy {
+				copyToClipboard(value)
+			} else if key == txblob.KeyPass {
+				showHidden(key, value, 0, 0)
+			} else {
+				showKeyValue(key, value, 0, 0)
+			}
+
+		case txformat.EntryKindList:
+			list, err := entry.List(key)
+			if err != nil {
+				return err
+			}
+
+			// Single item
+			if index > 0 {
+				index--
+				if index >= len(list) {
+					errColor.Printf("There are only %d items\n", len(list))
+					return nil
+				}
+
+				if copy {
+					copyToClipboard(list[index].Value)
+				} else if key == txblob.KeyLabels {
+					showKeyValue(fmt.Sprintf("%s[%d]", key, index+1), list[index].Value, 0, 0)
+				} else {
+					showKeyValue(fmt.Sprintf("%s[%d]", key, index+1), "", 0, 0)
+					fmt.Println(list[index].Value)
+				}
+				return nil
+			}
+
+			strs := txformat.ListEntryValues(list)
+
+			if copy && key == txblob.KeyLabels {
+				copyToClipboard(strings.Join(strs, ", "))
+			} else if copy {
+				copyToClipboard(strings.Join(strs, "\n"))
+			} else if key == txblob.KeyLabels {
+				showJoinedSlice(key, strs, 0, 0)
+			} else {
+				showLinedSlice(key, strs, 0, 0)
+			}
 		}
 	}
 
@@ -534,7 +513,7 @@ func (u *uiContext) addLabels(search string) error {
 	return nil
 }
 
-func (u *uiContext) deleteNote(search string, number int) error {
+func (u *uiContext) deleteList(search, key string, number int) error {
 	uuid, err := u.findOne(search)
 	if err != nil {
 		return err
@@ -548,23 +527,23 @@ func (u *uiContext) deleteNote(search string, number int) error {
 		return err
 	}
 
-	notes, err := blob.Notes()
+	list, err := txformat.Entry(blob).List(key)
 	if err != nil {
-		errColor.Println("Failed retrieving notes")
+		errColor.Println("Failed retrieving list")
 		return nil
 	}
 
 	index := number - 1
-
-	if index >= len(notes) {
-		errColor.Printf("Note number %d does not exist\n", number)
+	if index >= len(list) {
+		errColor.Printf("Number %d does not exist (only %d items)\n", number, len(list))
 		return nil
 	}
 
-	if err = u.store.RemoveNote(uuid, notes[index].UUID); err != nil {
+	if err = u.store.RemoveList(uuid, key, list[index].UUID); err != nil {
 		return err
 	}
-	infoColor.Println("Updated notes for", blob.Name())
+
+	infoColor.Printf("Updated %s for %s\n", key, blob.Name())
 
 	return nil
 }
@@ -743,7 +722,9 @@ func (u *uiContext) show(search string, snapshot int) error {
 	// Add back some known keys because we don't give a crap when they're
 	// displayed
 	arbitrary = append(arbitrary,
+		txblob.KeySync,
 		txblob.KeySyncKind,
+		txblob.KeyKnownHosts,
 		txblob.KeyPub,
 		txblob.KeyPath,
 		txblob.KeyHost,
@@ -758,8 +739,11 @@ func (u *uiContext) show(search string, snapshot int) error {
 
 	if snapshot != 0 {
 		// We don't use .Name() helper because when digging into history
-		// it can end up being nil.
-		showKeyValue(txblob.KeyName, blob.Get(txblob.KeyName), width, indent)
+		// it can end up being nil. But we also don't use Get() here because
+		// it's a protected key and can't be reached with that!
+		entry := txformat.Entry(blob)
+		name, _ := entry.String(txblob.KeyName)
+		showKeyValue(txblob.KeyName, name, width, indent)
 	}
 	showKeyValue(txblob.KeyUser, blob.Get(txblob.KeyUser), width, indent)
 	showKeyValue(txblob.KeyEmail, blob.Get(txblob.KeyEmail), width, indent)
@@ -776,7 +760,7 @@ func (u *uiContext) show(search string, snapshot int) error {
 		fmt.Println("Error fetching labels:", err)
 	} else if len(labels) > 0 {
 		labelStrs := txformat.ListEntryValues(labels)
-		showJoinedSlice("labels", labelStrs, width, indent)
+		showJoinedSlice(txblob.KeyLabels, labelStrs, width, indent)
 	}
 
 	notes, err := blob.Notes()
@@ -784,24 +768,34 @@ func (u *uiContext) show(search string, snapshot int) error {
 		fmt.Println("Error retrieving notes:", err)
 	} else if len(notes) > 0 {
 		noteStrs := txformat.ListEntryValues(notes)
-		showNotes(noteStrs, width, indent)
-	}
-
-	syncs, err := blob.Sync()
-	if err != nil {
-		fmt.Println("Error retrieving syncs:", err)
-	} else if len(syncs) > 0 {
-		syncStrs := txformat.ListEntryValues(syncs)
-		showJoinedSlice("sync", syncStrs, width, indent)
+		showLinedSlice(txblob.KeyNotes, noteStrs, width, indent)
 	}
 
 	sort.Strings(arbitrary)
 	for _, k := range arbitrary {
-		val := blob.Get(k)
-		if len(val) == 0 {
+		entry := txformat.Entry(blob)
+
+		kind, ok := entry.Kind(k)
+		if !ok {
 			continue
 		}
-		showKeyValue(k, val, width, indent)
+
+		switch kind {
+		case txformat.EntryKindList:
+			val, err := entry.List(k)
+			if err != nil {
+				return err
+			}
+			valStrs := txformat.ListEntryValues(val)
+			showLinedSlice(k, valStrs, width, indent)
+		case txformat.EntryKindString:
+			val, err := entry.String(k)
+			if err != nil {
+				return err
+			}
+			showKeyValue(k, val, width, indent)
+		}
+
 	}
 
 	if update, err := blob.Updated(); err != nil {
@@ -832,23 +826,23 @@ func showJoinedSlice(label string, slice []string, width, indent int) {
 	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, label+":"), strings.Join(slice, ", "))
 }
 
-func showNotes(notes []string, width, indent int) {
-	noteIndent := indent * 2
-	if noteIndent == 0 {
-		noteIndent += 2
+func showLinedSlice(key string, items []string, width, indent int) {
+	lineIndent := indent * 2
+	if lineIndent == 0 {
+		lineIndent += 2
 	}
 	ind := strings.Repeat(" ", indent)
 
-	fmt.Printf("%s%s\n", ind, keyColor.Sprintf("%*s", width, "notes:"))
-	for i, note := range notes {
-		showNote(i, note, noteIndent)
+	fmt.Printf("%s%s\n", ind, keyColor.Sprintf("%*s", width, key+":"))
+	for i, item := range items {
+		showLine(i, item, lineIndent)
 	}
 }
 
-func showNote(number int, note string, indent int) {
+func showLine(number int, item string, indent int) {
 	firstInd := strings.Repeat(" ", indent)
 	otherInd := strings.Repeat(" ", indent+4)
-	for i, line := range strings.Split(note, "\n") {
+	for i, line := range strings.Split(item, "\n") {
 		if i == 0 {
 			fmt.Printf("%s%s%s\n", firstInd, keyColor.Sprintf("%-4s", strconv.Itoa(number+1)+":"), line)
 			continue
