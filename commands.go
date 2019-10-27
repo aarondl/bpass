@@ -394,8 +394,8 @@ func (u *uiContext) set(search, key, value string) error {
 			errColor.Println(err)
 			return nil
 		}
-	case txblob.KeyUpdated, txblob.KeySnapshots, txblob.KeySync,
-		txblob.KeyLastSync, txblob.KeyPub, txblob.KeySecret:
+	case txblob.KeyUpdated, txblob.KeySnapshots,
+		txblob.KeyLastSync, txblob.KeyPriv, txblob.KeyPub:
 
 		errColor.Printf("%s cannot be set manually\n", key)
 	default:
@@ -898,7 +898,7 @@ func dumpBlob(blob map[string]interface{}, indent int) {
 				fmt.Printf("snapshot[%d]:\n", i)
 				dumpBlob(snapshot, indent+2)
 			}
-		case txblob.KeyNotes, txblob.KeyLabels, txblob.KeySync:
+		case txblob.KeyNotes, txblob.KeyLabels:
 			slice, ok := v.([]interface{})
 			if !ok {
 				fmt.Printf("%s are the wrong type: %T\n", k, v)

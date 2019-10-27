@@ -440,66 +440,6 @@ func (b Blobs) NewSync(kind string) (uuid string, err error) {
 	return uuid, nil
 }
 
-// AddSync adds a uuid to the sync master list
-func (b Blobs) AddSync(uuid string) error {
-	// Find updates the snapshot
-	masterUUID, blob, err := b.Find(syncMaster)
-	if err != nil {
-		return err
-	}
-
-	if len(masterUUID) == 0 {
-		// We have to create a new one
-		masterUUID, err = b.New(syncMaster)
-		if err != nil {
-			return err
-		}
-	} else {
-		list, err := blob.Sync()
-		if err != nil {
-			return err
-		}
-
-		// Check that we don't have it already
-		for _, l := range list {
-			if l.Value == uuid {
-				return nil
-			}
-		}
-	}
-
-	_, err = b.Store.Append(masterUUID, KeySync, uuid)
-	return err
-}
-
-// RemoveSync removes a synchronization key from the list of master syncs.
-// Returns true if it actually found something to remove
-func (b Blobs) RemoveSync(uuid string) (bool, error) {
-	// Find updates the snapshot
-	masterUUID, blob, err := b.Find(syncMaster)
-	if err != nil {
-		return false, err
-	}
-	if len(masterUUID) == 0 {
-		// There is no master, we have nothing to remove
-		return false, nil
-	}
-
-	list, err := blob.Sync()
-	if err != nil {
-		return false, err
-	}
-
-	// Delete it if we have it
-	for _, l := range list {
-		if l.Value == uuid {
-			return true, b.DeleteList(masterUUID, KeySync, l.UUID)
-		}
-	}
-
-	return false, nil
-}
-
 // touchUpdated refreshes the updated timestamp for the given item
 func (b Blobs) touchUpdated(uuid string) error {
 	return b.Store.Set(uuid, KeyUpdated, strconv.FormatInt(time.Now().UnixNano(), 10))

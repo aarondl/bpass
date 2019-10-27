@@ -31,7 +31,7 @@ func (e Entry) Kind(key string) (kind EntryKind, ok bool) {
 
 	_, ok = v.(string)
 	if ok {
-		return EntryKindString, false
+		return EntryKindString, true
 	}
 
 	// If it's not a string it must be list currently

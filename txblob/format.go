@@ -20,7 +20,7 @@ const (
 	// Synchronization keys in user data
 	KeySync       = "sync"
 	KeySyncKind   = "synckind"
-	KeySecret     = "secretkey"
+	KeyPriv       = "privkey"
 	KeyPub        = "pubkey"
 	KeyHost       = "host"
 	KeyPort       = "port"
@@ -31,7 +31,6 @@ const (
 
 const (
 	syncPrefix = "sync/"
-	syncMaster = syncPrefix + "master"
 )
 
 var (
@@ -51,7 +50,7 @@ var (
 
 		KeySync,
 		KeySyncKind,
-		KeySecret,
+		KeyPriv,
 		KeyPub,
 		KeyHost,
 		KeyPort,
@@ -72,6 +71,6 @@ var (
 		KeyUpdated,
 
 		// Slices
-		KeyNotes, KeyLabels, KeySync, KeyKnownHosts,
+		KeyNotes, KeyLabels, KeyKnownHosts,
 	}
 )

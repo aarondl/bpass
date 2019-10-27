@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -25,59 +26,160 @@ import (
 )
 
 const (
-	syncMasterKey = "sync/master"
-
 	syncSSH = "ssh"
 )
 
-func (u *uiContext) sync(auto, push bool) error {
-	master, masterBlob, err := u.store.Find(syncMasterKey)
-	if err != nil {
-		return err
-	}
-	if len(master) == 0 {
-		if !auto {
-			infoColor.Println("No sync accounts created (see: sync add)")
-		}
-		return nil
-	}
+var (
+	errNotFound = errors.New("not found")
+)
 
-	syncs, err := masterBlob.Sync()
+func (u *uiContext) sync(auto, push bool) error {
+	err := u.store.UpdateSnapshot()
 	if err != nil {
 		return err
-	}
-	if len(master) == 0 {
-		if !auto {
-			infoColor.Println("No sync accounts created (see: sync add)")
-		}
-		return nil
 	}
 
 	// From here on we need to avoid updating the store snapshot until we're
 	// done syncing all the accounts, otherwise we run the risk of downloading
-	// a new sync account halfway through and that's just weird.
+	// and running a new sync partway through and that's unexpected behavior
+	syncs, err := u.collectSyncs()
+	if err != nil {
+		return err
+	}
 
-	var validSyncs []string
+	// From this point on we don't worry about key's not being present for
+	// the most part since collectSyncs should only return valid things
+	hosts := make(map[string]string)
+	logs := make([][]txformat.Tx, 0, len(syncs))
+	for _, uuid := range syncs {
+		entry := u.store.Snapshot[uuid]
+		name, _ := entry.String(txblob.KeyName)
 
-	for _, s := range syncs {
-		uuid := s.Value
+		infoColor.Println("pull:", name)
 
-		entry, ok := u.store.Snapshot[uuid]
-		if !ok {
-			errColor.Printf("entry %q was set up as sync account, but no longer exists and will be removed\n", uuid)
-			if err := u.store.Store.DeleteList(master, txblob.KeySync, s.UUID); err != nil {
-				return err
+		ct, hostentry, err := pullBlob(u, uuid)
+
+		// Add to known hosts
+		if len(hostentry) != 0 {
+			hosts[uuid] = hostentry
+		}
+
+		if err != nil {
+			if err != errNotFound {
+				errColor.Printf("error pulling %q: %v\n", name, err)
 			}
 			continue
 		}
 
+		pt, err := decryptBlob(u, name, ct)
+		if err != nil {
+			errColor.Println("failed to decode %q: %v\n", name, err)
+			continue
+		}
+
+		log, err := txformat.NewLog(pt)
+		if err != nil {
+			errColor.Println("failed parsing log %q: %v\n", name, err)
+			continue
+		}
+
+		logs = append(logs, log)
+	}
+
+	out, err := mergeLogs(u, u.store.Log, logs)
+	if err != nil {
+		errColor.Println("aborting sync, failed to merge logs:", err)
+		return nil
+	}
+
+	u.store.ResetSnapshot()
+	u.store.Log = out
+	if err = u.store.UpdateSnapshot(); err != nil {
+		errColor.Println("failed to rebuild snapshot, poisoned by sync:", err)
+		errColor.Println("exiting to avoid corrupting local file")
+		os.Exit(1)
+	}
+
+	if err = saveHosts(u.store.Store, hosts); err != nil {
+		return err
+	}
+
+	if !push {
+		return nil
+	}
+
+	// Save & encrypt in memory
+	var pt, ct []byte
+	if pt, err = u.store.Save(); err != nil {
+		return err
+	}
+	if ct, err = crypt.Encrypt(cryptVersion, u.key, u.salt, pt); err != nil {
+		return err
+	}
+
+	// Push back to other machines
+	hosts = make(map[string]string)
+	for _, uuid := range syncs {
+		entry := u.store.Snapshot[uuid]
 		name, _ := entry.String(txblob.KeyName)
 
-		// We ignore the error here, it will either be a wrong type which
+		infoColor.Println("push:", name)
+
+		hostentry, err := pushBlob(u, uuid, ct)
+		if err != nil {
+			errColor.Printf("error pushing to %q: %v\n", name, err)
+		}
+
+		if len(hostentry) != 0 {
+			hosts[uuid] = hostentry
+		}
+	}
+
+	if err = saveHosts(u.store.Store, hosts); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func saveHosts(store *txformat.Store, newHosts map[string]string) error {
+	for uuid, hostentry := range newHosts {
+		if _, err := store.Append(uuid, txblob.KeyKnownHosts, hostentry); err != nil {
+			return fmt.Errorf("failed to append new host entry: %w", err)
+		}
+	}
+
+	return store.UpdateSnapshot()
+}
+
+// collectSyncs attempts to gather automatic sync entries and ensure that basic
+// attributes are available (name, path, synckind) to make it easier to use
+// later
+func (u *uiContext) collectSyncs() ([]string, error) {
+	var validSyncs []string
+
+	for uuid, entry := range u.store.Snapshot {
+		sync, _ := entry.String(txblob.KeySync)
+		if sync != "true" {
+			continue
+		}
+
+		name, err := entry.String(txblob.KeyName)
+		if err != nil {
+			errColor.Printf("entry %q is a sync account but its name is broken (skipping)", uuid)
+			continue
+		}
+
+		_, err = entry.String(txblob.KeyPath)
+		if err != nil {
+			errColor.Printf("entry %q is a sync account but it has no %q key (skipping)\n", name, txblob.KeyPath)
+			continue
+		}
+
 		kind, err := entry.String(txblob.KeySyncKind)
 		if err != nil {
 			if txformat.IsKeyNotFound(err) {
-				errColor.Printf("entry %q is a sync account but had no %q key\n", name, txblob.KeySyncKind)
+				errColor.Printf("entry %q is configured to sync but has no %q key (skipping)\n", name, txblob.KeySyncKind)
 				continue
 			} else {
 				errColor.Println(err)
@@ -89,87 +191,78 @@ func (u *uiContext) sync(auto, push bool) error {
 		case syncSSH:
 			validSyncs = append(validSyncs, uuid)
 		default:
-			errColor.Printf("entry %q is a %q sync account, but it's kind is unknown (old bpass version?)\n", name, kind)
+			errColor.Printf("entry %q is a %q sync account, but this kind is unknown (old bpass version?)\n", name, kind)
 		}
 	}
 
-	newHosts := make(map[string]string)
-	var fetchedLogs [][]txformat.Tx
-	var pt, ct []byte
-	var log []txformat.Tx
+	return validSyncs, nil
+}
 
-Syncs:
-	for _, uuid := range validSyncs {
-		entry := u.store.Snapshot[uuid]
-		name, _ := entry.String(txblob.KeyName)
-		path, _ := entry.String(txblob.KeyPath)
-		kind := entry[txblob.KeySyncKind].(string)
+// pullBlob tries to download a file from the given sync entry
+func pullBlob(u *uiContext, uuid string) (ct []byte, hostentry string, err error) {
+	entry := u.store.Snapshot[uuid]
+	kind := entry[txblob.KeySyncKind].(string)
 
-		infoColor.Println("pulling:", name)
-
-		switch kind {
-		case syncSSH:
-			var hostentry string
-			hostentry, ct, err = u.sshPull(entry)
-
-			if err != nil {
-				if scpsync.IsNotFoundErr(err) {
-					infoColor.Println(name, "did not have the file, skipping")
-					err = nil
-					continue
-				}
-			}
-
-			if len(hostentry) != 0 {
-				newHosts[uuid] = hostentry
-			}
-		}
-
-		if err != nil {
-			errColor.Printf("failed sync pull %q: %v\n", name, err)
-			continue
-		}
-
-		pass := u.pass
-		for {
-			infoColor.Println("decrypting:", name)
-
-			// Decrypt payload with our loaded key
-			_, pt, err = crypt.Decrypt([]byte(pass), ct)
-			if err == nil {
-				break
-			}
-
-			if err == crypt.ErrWrongPassphrase {
-				pass, err = u.prompt(inputPromptColor.Sprintf("[%s] %s passphrase: ", name, path))
-
-				if err != nil || len(pass) == 0 {
-					infoColor.Println("Skipping")
-					break
-				}
-			} else {
-				errColor.Printf("failed decrypt %q: %v\n", name, err)
-				continue Syncs
-			}
-		}
-
-		log, err = txformat.NewLog(pt)
-		if err != nil {
-			return err
-		}
-
-		fetchedLogs = append(fetchedLogs, log)
+	switch kind {
+	case syncSSH:
+		hostentry, ct, err = u.sshPull(entry)
 	}
 
-	infoColor.Println("merging fetched logs")
+	if err != nil {
+		if scpsync.IsNotFoundErr(err) {
+			return nil, hostentry, errNotFound
+		}
+		return nil, hostentry, err
+	}
+
+	return ct, hostentry, nil
+}
+
+// pushBlob uploads a file to a given sync entry
+func pushBlob(u *uiContext, uuid string, payload []byte) (hostentry string, err error) {
+	entry := u.store.Snapshot[uuid]
+	kind := entry[txblob.KeySyncKind].(string)
+
+	switch kind {
+	case syncSSH:
+		hostentry, err = u.sshPush(entry, payload)
+	}
+
+	return hostentry, err
+}
+
+func decryptBlob(u *uiContext, name string, ct []byte) (pt []byte, err error) {
+	pass := u.pass
+	for {
+		// Decrypt payload with our loaded key
+		_, pt, err = crypt.Decrypt([]byte(pass), ct)
+		if err == nil {
+			return pt, err
+		}
+
+		if err != crypt.ErrWrongPassphrase {
+			return nil, err
+		}
+
+		pass, err = u.prompt(inputPromptColor.Sprintf("%s passphrase: ", name))
+
+		if err != nil || len(pass) == 0 {
+			return nil, nil
+		}
+	}
+}
+
+func mergeLogs(u *uiContext, in []txformat.Tx, toMerge [][]txformat.Tx) ([]txformat.Tx, error) {
+	if len(toMerge) == 0 {
+		return in, nil
+	}
 
 	var c []txformat.Tx
 	var conflicts []txformat.Conflict
-	for _, log := range fetchedLogs {
-		c, conflicts = txformat.Merge(u.store.Log, log, conflicts)
+	for _, log := range toMerge {
+		c, conflicts = txformat.Merge(in, log, conflicts)
 
 		if len(conflicts) == 0 {
-			u.store.Log = c
 			break
 		}
 
@@ -207,7 +300,7 @@ Syncs:
 			for {
 				line, err := u.prompt("[R]estore item? [D]elete item? (r/R/d/D): ")
 				if err != nil {
-					return err
+					return nil, err
 				}
 
 				switch line {
@@ -222,63 +315,7 @@ Syncs:
 		}
 	}
 
-	for uuid, hostentry := range newHosts {
-		if _, err = u.store.Store.Append(uuid, txblob.KeyKnownHosts, hostentry); err != nil {
-			return fmt.Errorf("failed to append new host entry: %w", err)
-		}
-	}
-
-	if err = u.store.UpdateSnapshot(); err != nil {
-		return fmt.Errorf("poisoned by our syncing friends: %w", err)
-	}
-
-	// We have all of our friends stuff, attempt to create a package to send
-	// them
-	if !push {
-		return nil
-	}
-
-	infoColor.Println("pushing merged")
-
-	if pt, err = u.store.Save(); err != nil {
-		return err
-	}
-
-	if ct, err = crypt.Encrypt(cryptVersion, u.key, u.salt, pt); err != nil {
-		return err
-	}
-
-	newHosts = make(map[string]string)
-	for _, uuid := range validSyncs {
-		entry := u.store.Snapshot[uuid]
-		name, _ := entry.String(txblob.KeyName)
-		kind := entry[txblob.KeySyncKind].(string)
-
-		infoColor.Println("pushing:", name)
-
-		switch kind {
-		case syncSSH:
-			var hostentry string
-			hostentry, err = u.sshPush(entry, ct)
-			if len(hostentry) != 0 {
-				newHosts[uuid] = hostentry
-			}
-		}
-
-		if err != nil {
-			name, _ := entry.String(txblob.KeyName)
-			errColor.Printf("failed syncing %q: %v\n", name, err)
-			continue
-		}
-	}
-
-	for uuid, hostentry := range newHosts {
-		if _, err = u.store.Store.Append(uuid, txblob.KeyKnownHosts, hostentry); err != nil {
-			return fmt.Errorf("failed to append new host entry: %w", err)
-		}
-	}
-
-	return nil
+	return c, nil
 }
 
 func (u *uiContext) sshPull(entry txformat.Entry) (hostentry string, ct []byte, err error) {
@@ -299,13 +336,13 @@ func (u *uiContext) sshPull(entry txformat.Entry) (hostentry string, ct []byte, 
 
 	payload, err := scpsync.Recv(address, config, path)
 	if err != nil {
-		return "", nil, err
+		return asker.newHost, nil, err
 	}
 
 	return asker.newHost, payload, nil
 }
 
-func (u *uiContext) sshPush(entry txformat.Entry, payload []byte) (hostentry string, err error) {
+func (u *uiContext) sshPush(entry txformat.Entry, ct []byte) (hostentry string, err error) {
 	address, path, config, err := sshConfig(entry)
 	if err != nil {
 		return "", err
@@ -321,7 +358,7 @@ func (u *uiContext) sshPush(entry txformat.Entry, payload []byte) (hostentry str
 	asker := &hostAsker{u: u, known: known}
 	config.HostKeyCallback = asker.callback
 
-	err = scpsync.Send(address, config, path, 0600, payload)
+	err = scpsync.Send(address, config, path, 0600, ct)
 	if err != nil {
 		return "", err
 	}
@@ -334,7 +371,7 @@ func sshConfig(entry txformat.Entry) (address, path string, config *ssh.ClientCo
 	port, _ := entry.String(txblob.KeyPort)
 	user, _ := entry.String(txblob.KeyUser)
 	pass, _ := entry.String(txblob.KeyPass)
-	secretKey, _ := entry.String(txblob.KeySecret)
+	secretKey, _ := entry.String(txblob.KeyPriv)
 	path, _ = entry.String(txblob.KeyPath)
 
 	if len(user) == 0 {
@@ -500,6 +537,9 @@ func (u *uiContext) syncAdd(kind string) error {
 		}
 
 		// Use raw-er sets to avoid timestamp spam
+		if err = u.store.Store.Set(uuid, txblob.KeySync, "true"); err != nil {
+			return err
+		}
 		if err = u.store.Store.Set(uuid, txblob.KeySyncKind, kind); err != nil {
 			return err
 		}
@@ -542,9 +582,9 @@ func (u *uiContext) syncAdd(kind string) error {
 			if err != nil {
 				errColor.Println("failed to parse public key:", err)
 			}
-			publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public)))
+			publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public))) + " @bpass"
 
-			if err = u.store.Set(uuid, txblob.KeySecret, string(bytes.TrimSpace(b))); err != nil {
+			if err = u.store.Set(uuid, txblob.KeyPriv, string(bytes.TrimSpace(b))); err != nil {
 				return err
 			}
 			if err = u.store.Set(uuid, txblob.KeyPub, publicStr); err != nil {
@@ -573,9 +613,9 @@ func (u *uiContext) syncAdd(kind string) error {
 			if err != nil {
 				errColor.Println("failed to parse public key:", err)
 			}
-			publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public)))
+			publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public))) + " @bpass"
 
-			if err = u.store.Set(uuid, txblob.KeySecret, string(bytes.TrimSpace(b))); err != nil {
+			if err = u.store.Set(uuid, txblob.KeyPriv, string(bytes.TrimSpace(b))); err != nil {
 				return err
 			}
 			if err = u.store.Set(uuid, txblob.KeyPub, publicStr); err != nil {
@@ -600,17 +640,13 @@ func (u *uiContext) syncAdd(kind string) error {
 			panic("how did this happen?")
 		}
 
-		if err = u.store.AddSync(uuid); err != nil {
-			return err
-		}
-
 		blob, err := u.store.Get(uuid)
 		if err != nil {
 			return err
 		}
 
 		fmt.Println()
-		infoColor.Println("Added new sync entry:", blob.Name())
+		infoColor.Println("added new sync entry:", blob.Name())
 
 		return nil
 	})
@@ -626,10 +662,10 @@ func (u *uiContext) syncRemove(name string) error {
 		return nil
 	}
 
-	if _, err := u.store.RemoveSync(uuid); err != nil {
+	if err := u.store.Set(uuid, txblob.KeySync, "false"); err != nil {
 		return err
 	}
 
-	infoColor.Printf("removed %q from sync (use rm to delete entry)\n", name)
+	infoColor.Printf("%q no longer auto-syncs", name)
 	return nil
 }

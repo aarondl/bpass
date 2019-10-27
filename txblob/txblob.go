@@ -119,15 +119,6 @@ func (b Blob) Labels() (labels []txformat.ListEntry, err error) {
 	return labels, err
 }
 
-// Sync for the blob, returns nil if not set
-func (b Blob) Sync() (sync []txformat.ListEntry, err error) {
-	sync, err = txformat.Entry(b).List(KeySync)
-	if err != nil && txformat.IsKeyNotFound(err) {
-		err = nil
-	}
-	return sync, err
-}
-
 // Updated timestamp, if not set it will be time's zero value, returns an error
 // if the underlying type was wrong.
 func (b Blob) Updated() (time.Time, error) {
