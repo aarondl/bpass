@@ -494,6 +494,13 @@ func (u *uiContext) findOne(search string) (string, error) {
 		return id, nil
 	}
 
+	// If there's an exact match use that
+	for u, name := range entries {
+		if name == search {
+			return u, nil
+		}
+	}
+
 	names := entries.Names()
 	sort.Strings(names)
 	errColor.Printf("Multiple matches for search (%q):", search)

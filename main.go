@@ -22,6 +22,8 @@ type uiContext struct {
 	filename      string
 	shortFilename string
 
+	created bool
+
 	// Decrypted and decoded storage
 	store txblob.Blobs
 	// save key + salt for encrypting later
@@ -71,13 +73,21 @@ func main() {
 		goto Exit
 	}
 
-	if err = r.run(); err != nil {
-		if err == ErrInterrupt {
-			errColor.Println("exiting, did not save file")
+	switch {
+	case lpassImportCmd.Used:
+		if err = importLastpass(ctx); err != nil {
+			errColor.Println("error occurred: %+v\nexiting without saving", err)
 			goto Exit
 		}
-		errColor.Printf("error occurred: %+v\n", err)
-		goto Exit
+	default:
+		if err = r.run(); err != nil {
+			if err == ErrInterrupt {
+				errColor.Println("exiting, did not save file")
+				goto Exit
+			}
+			errColor.Printf("error occurred: %+v\n", err)
+			goto Exit
+		}
 	}
 
 	// save the changed data
@@ -102,13 +112,11 @@ Exit:
 }
 
 func (u *uiContext) loadBlob() error {
-	create := false
-
 	// Check the file exists and it's a file
 	check, err := os.Stat(flagFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			create = true
+			u.created = true
 		} else {
 			return err
 		}
@@ -116,12 +124,12 @@ func (u *uiContext) loadBlob() error {
 		return errors.New("given file name is a directory")
 	}
 
-	if create {
+	if u.created {
 		infoColor.Printf("Creating new file: %s\n", u.filename)
 	}
 
 	var pwd string
-	if create {
+	if u.created {
 		pwd, err = u.term.LineHidden(inputPromptColor.Sprint("passphrase: "))
 		if err != nil {
 			return err

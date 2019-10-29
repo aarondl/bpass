@@ -108,7 +108,6 @@ func (b Blobs) Search(search string) (entries SearchResults, err error) {
 AllKeys:
 	for uuid, entry := range b.Store.Snapshot {
 		blob := Blob(entry)
-
 		name := blob.Name()
 
 		if len(fragments) == 1 {

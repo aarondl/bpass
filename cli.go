@@ -15,7 +15,8 @@ var (
 )
 
 var (
-	versionCmd = flaggy.NewSubcommand("version")
+	versionCmd     = flaggy.NewSubcommand("version")
+	lpassImportCmd = flaggy.NewSubcommand("lpassimport")
 )
 
 type cliContext struct {
@@ -27,7 +28,7 @@ var helpTemplate = `Usage:
 {{- if .Subcommands}}
 
 Commands:
-  {{- range .Subcommands}}
+  {{range .Subcommands -}}
   {{.LongName}}
   {{end -}}
 {{- end}}
@@ -48,17 +49,21 @@ func parseCli() {
 	parser.Bool(&flagHelp, "h", "help", "Show help")
 	parser.String(&flagFile, "f", "file", "The file to open")
 
+	versionCmd.Description = "print version and exit"
+	lpassImportCmd.Description = "import lastpass csv by running `lpass export`"
+
 	parser.ShowHelpWithHFlag = false
 	parser.ShowHelpOnUnexpected = false
 
 	// Configure some bits about the lib
 	parser.DisableShowVersionWithVersion()
-	if err := parser.SetHelpTemplate(helpTemplate); err != nil {
+	/*if err := parser.SetHelpTemplate(helpTemplate); err != nil {
 		// This should never occur
 		panic(err)
-	}
+	}*/
 
 	parser.AttachSubcommand(versionCmd, 1)
+	parser.AttachSubcommand(lpassImportCmd, 1)
 	parser.Parse()
 
 	if flagHelp {
