@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -53,7 +54,7 @@ func (u *uiContext) sync(auto, push bool) error {
 	logs := make([][]txformat.Tx, 0, len(syncs))
 	for _, uuid := range syncs {
 		entry := u.store.Snapshot[uuid]
-		name, _ := entry.String(txblob.KeyName)
+		name, _ := entry[txblob.KeyName]
 
 		infoColor.Println("pull:", name)
 
@@ -121,7 +122,7 @@ func (u *uiContext) sync(auto, push bool) error {
 	hosts = make(map[string]string)
 	for _, uuid := range syncs {
 		entry := u.store.Snapshot[uuid]
-		name, _ := entry.String(txblob.KeyName)
+		name, _ := entry[txblob.KeyName]
 
 		infoColor.Println("push:", name)
 
@@ -144,9 +145,16 @@ func (u *uiContext) sync(auto, push bool) error {
 
 func saveHosts(store *txformat.Store, newHosts map[string]string) error {
 	for uuid, hostentry := range newHosts {
-		if _, err := store.Append(uuid, txblob.KeyKnownHosts, hostentry); err != nil {
-			return fmt.Errorf("failed to append new host entry: %w", err)
+		entry := store.Snapshot[uuid]
+		hosts := entry[txblob.KeyKnownHosts]
+		if len(hosts) == 0 {
+			store.Set(uuid, txblob.KeyKnownHosts, hostentry)
+			continue
 		}
+
+		hostLines := strings.Split(hosts, "\n")
+		hostLines = append(hostLines, hostentry)
+		store.Set(uuid, txblob.KeyKnownHosts, strings.Join(hostentry, "\n"))
 	}
 
 	return store.UpdateSnapshot()
@@ -159,24 +167,24 @@ func (u *uiContext) collectSyncs() ([]string, error) {
 	var validSyncs []string
 
 	for uuid, entry := range u.store.Snapshot {
-		sync, _ := entry.String(txblob.KeySync)
+		sync, _ := entry[txblob.KeySync]
 		if sync != "true" {
 			continue
 		}
 
-		name, err := entry.String(txblob.KeyName)
+		name, err := entry[txblob.KeyName]
 		if err != nil {
 			errColor.Printf("entry %q is a sync account but its name is broken (skipping)", uuid)
 			continue
 		}
 
-		_, err = entry.String(txblob.KeyPath)
+		_, err = entry[txblob.KeyPath]
 		if err != nil {
 			errColor.Printf("entry %q is a sync account but it has no %q key (skipping)\n", name, txblob.KeyPath)
 			continue
 		}
 
-		kind, err := entry.String(txblob.KeySyncKind)
+		kind, err := entry[txblob.KeySyncKind]
 		if err != nil {
 			if txformat.IsKeyNotFound(err) {
 				errColor.Printf("entry %q is configured to sync but has no %q key (skipping)\n", name, txblob.KeySyncKind)
@@ -201,7 +209,7 @@ func (u *uiContext) collectSyncs() ([]string, error) {
 // pullBlob tries to download a file from the given sync entry
 func pullBlob(u *uiContext, uuid string) (ct []byte, hostentry string, err error) {
 	entry := u.store.Snapshot[uuid]
-	kind := entry[txblob.KeySyncKind].(string)
+	kind := entry[txblob.KeySyncKind]
 
 	switch kind {
 	case syncSSH:
@@ -408,7 +416,7 @@ func sshConfig(entry txformat.Entry) (address, path string, config *ssh.ClientCo
 
 type hostAsker struct {
 	u       *uiContext
-	known   []txformat.ListEntry
+	known   string
 	newHost string
 }
 
@@ -421,8 +429,10 @@ func (h *hostAsker) callback(hostname string, remote net.Addr, key ssh.PublicKey
 	addr := remote.String()
 	hostLine := fmt.Sprintf(`%s %s %s %s`, hostname, addr, keyType, keyHash)
 
-	for _, h := range h.known {
-		vals := strings.Split(h.Value, " ")
+	knownLines := strings.Split(h.known, "\n")
+
+	for _, h := range knownLines {
+		vals := strings.Split(h, " ")
 
 		if vals[0] != hostname {
 			continue
@@ -540,21 +550,12 @@ func (u *uiContext) syncAdd(kind string) error {
 		if err = u.store.Store.Set(uuid, txblob.KeySync, "true"); err != nil {
 			return err
 		}
-		if err = u.store.Store.Set(uuid, txblob.KeySyncKind, kind); err != nil {
-			return err
-		}
-		if err = u.store.Store.Set(uuid, txblob.KeyUser, user); err != nil {
-			return err
-		}
-		if err = u.store.Store.Set(uuid, txblob.KeyHost, host); err != nil {
-			return err
-		}
-		if err = u.store.Store.Set(uuid, txblob.KeyPort, port); err != nil {
-			return err
-		}
-		if err = u.store.Store.Set(uuid, txblob.KeyPath, file); err != nil {
-			return err
-		}
+
+		var u url.URL
+		u.Scheme = kind
+		u.User = user
+		u.Host = fmt.Sprintf("%s:%s", host, port)
+		u.Path = file
 
 		inputPromptColor.Println("Key type:")
 		choice, err := u.getMenuChoice(inputPromptColor.Sprint("> "), []string{"ED25519", "RSA 4096", "Password"})
@@ -630,15 +631,14 @@ func (u *uiContext) syncAdd(kind string) error {
 				return err
 			}
 
-			if err = u.store.Set(uuid, txblob.KeyUser, user); err != nil {
-				return err
-			}
 			if err = u.store.Set(uuid, txblob.KeyPass, pass); err != nil {
 				return err
 			}
 		default:
 			panic("how did this happen?")
 		}
+
+		u.store.Store.Set(uuid, txblob.KeyURL, u.String())
 
 		blob, err := u.store.Get(uuid)
 		if err != nil {
@@ -650,22 +650,4 @@ func (u *uiContext) syncAdd(kind string) error {
 
 		return nil
 	})
-}
-
-func (u *uiContext) syncRemove(name string) error {
-	uuid, _, err := u.store.Find(name)
-	if err != nil {
-		return err
-	}
-	if len(uuid) == 0 {
-		errColor.Printf("could not find %s\n", name)
-		return nil
-	}
-
-	if err := u.store.Set(uuid, txblob.KeySync, "false"); err != nil {
-		return err
-	}
-
-	infoColor.Printf("%q no longer auto-syncs", name)
-	return nil
 }

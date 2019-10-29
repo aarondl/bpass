@@ -25,11 +25,11 @@ import (
 //       }
 //     },
 //     "log": [
-//       { "id": "4c4...", "time": 1571887976, "kind": "add", "uuid": "d6f..." },
-//       { "id": "a7c...", "time": 1571887977, "kind": "set", "uuid": "d6f...", "key": "test1", "value": "value" },
-//       { "id": "5f0...", "time": 1571887978, "kind": "set", "uuid": "d6f...", "key": "test2", "value": "value" },
-//       { "id": "b7b...", "time": 1571887979, "kind": "set", "uuid": "d6f...", "key": "test1", "value": "notvalue" },
-//       { "id": "035...", "time": 1571887979, "kind": "delkey", "uuid": "d6f...", "key": "test2" }
+//       { "time": 1571887976, "kind": "add", "uuid": "d6f..." },
+//       { "time": 1571887977, "kind": "set", "uuid": "d6f...", "key": "test1", "value": "value" },
+//       { "time": 1571887978, "kind": "set", "uuid": "d6f...", "key": "test2", "value": "value" },
+//       { "time": 1571887979, "kind": "set", "uuid": "d6f...", "key": "test1", "value": "notvalue" },
+//       { "time": 1571887979, "kind": "delkey", "uuid": "d6f...", "key": "test2" }
 //     ]
 //   }
 type Store struct {
@@ -42,6 +42,10 @@ type Store struct {
 
 	txPoint int
 }
+
+// Entry is an cached entry in the store, it holds the values as currently
+// known.
+type Entry map[string]string
 
 type storeNoSnapshot struct {
 	Log []Tx `msgpack:"log,omitempty" json:"log,omitempty"`
@@ -78,11 +82,6 @@ func (s *Store) Save() ([]byte, error) {
 
 // Add a new entry
 func (s *Store) Add() (uuid string, err error) {
-	idObj, err := uuidpkg.NewV4()
-	if err != nil {
-		return "", err
-	}
-
 	uuidObj, err := uuidpkg.NewV4()
 	if err != nil {
 		return "", err
@@ -91,7 +90,6 @@ func (s *Store) Add() (uuid string, err error) {
 	// Does not use appendLog so ID/Time must be filled out by hand
 	s.Log = append(s.Log,
 		Tx{
-			ID:   idObj.String(),
 			Time: time.Now().UnixNano(),
 			Kind: TxAdd,
 			UUID: uuidObj.String(),
@@ -102,38 +100,20 @@ func (s *Store) Add() (uuid string, err error) {
 }
 
 // Set k=v for a uuid
-func (s *Store) Set(uuid, key, value string) error {
-	return s.appendLog(
+func (s *Store) Set(uuid, key, value string) {
+	s.appendLog(
 		Tx{
-			Kind:  TxSet,
+			Kind:  TxSetKey,
 			UUID:  uuid,
 			Key:   key,
-			Value: value,
-		},
-	)
-}
-
-// Append to a list key
-func (s *Store) Append(uuid, key, value string) (index string, err error) {
-	indexObj, err := uuidpkg.NewV4()
-	if err != nil {
-		return "", err
-	}
-
-	return indexObj.String(), s.appendLog(
-		Tx{
-			Kind:  TxAddList,
-			UUID:  uuid,
-			Key:   key,
-			Index: indexObj.String(),
 			Value: value,
 		},
 	)
 }
 
 // Delete an entry
-func (s *Store) Delete(uuid string) error {
-	return s.appendLog(
+func (s *Store) Delete(uuid string) {
+	s.appendLog(
 		Tx{
 			Kind: TxDelete,
 			UUID: uuid,
@@ -142,8 +122,8 @@ func (s *Store) Delete(uuid string) error {
 }
 
 // DeleteKey deletes a key from an entry
-func (s *Store) DeleteKey(uuid, key string) error {
-	return s.appendLog(
+func (s *Store) DeleteKey(uuid, key string) {
+	s.appendLog(
 		Tx{
 			Kind: TxDeleteKey,
 			UUID: uuid,
@@ -152,28 +132,10 @@ func (s *Store) DeleteKey(uuid, key string) error {
 	)
 }
 
-// DeleteList deletes a list item
-func (s *Store) DeleteList(uuid, key, listUUID string) error {
-	return s.appendLog(
-		Tx{
-			Kind:  TxDeleteList,
-			UUID:  uuid,
-			Key:   key,
-			Index: listUUID,
-		},
-	)
-}
-
 // appendLog creates a new UUID for tx.ID and appends the log
-func (s *Store) appendLog(tx Tx) error {
-	uuidObj, err := uuidpkg.NewV4()
-	if err != nil {
-		return err
-	}
-	tx.ID = uuidObj.String()
+func (s *Store) appendLog(tx Tx) {
 	tx.Time = time.Now().UnixNano()
 	s.Log = append(s.Log, tx)
-	return nil
 }
 
 // Begin a transaction, will panic if commit/rollback have not been issued
@@ -376,7 +338,7 @@ func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 	lenb := len(b)
 
 	if lena == lenb &&
-		a[0].ID == b[0].ID && a[lena-1].ID == b[lenb-1].ID {
+		a[0].Time == b[0].Time && a[lena-1].Time == b[lenb-1].Time {
 		// These are the same list of events
 		// There can be no possible fork that has happened if they
 		// 1. Are not of differing length
@@ -414,7 +376,7 @@ func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 			// Before we mark ourselves as deleted, make sure we aren't
 			// part of a resolution.
 			for _, res := range resolved {
-				if res.DeleteTx.ID != c[last].ID {
+				if res.DeleteTx.Time != c[last].Time {
 					continue
 				}
 
@@ -435,7 +397,7 @@ func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 		deleteTx := c[ind]
 		// Check if its resolved
 		for _, res := range resolved {
-			if res.DeleteTx.ID == deleteTx.ID {
+			if res.DeleteTx.Time == deleteTx.Time {
 				// Assert for the impossible, and delete ourselves off the end
 				if res.resolution != conflictDelete {
 					panic("impossible situation")
@@ -447,7 +409,7 @@ func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 
 		// Make sure we haven't noted this one already first
 		for _, con := range conflicts {
-			if con.DeleteTx.ID == deleteTx.ID {
+			if con.DeleteTx.Time == deleteTx.Time {
 				return
 			}
 		}
@@ -466,7 +428,7 @@ func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 		}
 
 		// If ids are the same, append and move on, haven't reached fork
-		if a[i].ID == b[j].ID {
+		if a[i].Time == b[j].Time {
 			if a[i].Kind == TxDelete {
 				deleted[a[i].UUID] = i
 			}
@@ -478,7 +440,7 @@ func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 		}
 
 		// Compare the txs
-		if a[i].Time < b[j].Time || (a[i].Time == b[j].Time && a[i].UUID < b[j].UUID) {
+		if a[i].Time < b[j].Time {
 			c = append(c, a[i])
 			i++
 		} else {
@@ -513,30 +475,7 @@ func applyTx(dst map[string]Entry, tx Tx) error {
 		if _, ok := dst[tx.UUID]; ok {
 			return fmt.Errorf("%s already exists in snapshot", tx.UUID)
 		}
-		dst[tx.UUID] = make(map[string]interface{})
-	case TxSet:
-		entry, err := getEntry(dst, tx.UUID)
-		if err != nil {
-			return err
-		}
-
-		entry[tx.Key] = tx.Value
-	case TxAddList:
-		entry, err := getEntry(dst, tx.UUID)
-		if err != nil {
-			return err
-		}
-
-		list, err := entry.List(tx.Key)
-		if err != nil {
-			if !IsKeyNotFound(err) {
-				return err
-			}
-			list = make([]ListEntry, 0, 1)
-		}
-
-		list = append(list, ListEntry{UUID: tx.Index, Value: tx.Value})
-		entry.SetList(tx.Key, list)
+		dst[tx.UUID] = make(Entry)
 	case TxDelete:
 		_, ok := dst[tx.UUID]
 		if !ok {
@@ -544,6 +483,13 @@ func applyTx(dst map[string]Entry, tx Tx) error {
 		}
 
 		delete(dst, tx.UUID)
+	case TxSetKey:
+		entry, err := getEntry(dst, tx.UUID)
+		if err != nil {
+			return err
+		}
+
+		entry[tx.Key] = tx.Value
 	case TxDeleteKey:
 		entry, err := getEntry(dst, tx.UUID)
 		if err != nil {
@@ -551,40 +497,6 @@ func applyTx(dst map[string]Entry, tx Tx) error {
 		}
 
 		delete(entry, tx.Key)
-	case TxDeleteList:
-		entry, err := getEntry(dst, tx.UUID)
-		if err != nil {
-			return err
-		}
-
-		list, err := entry.List(tx.Key)
-		if err != nil {
-			if k, ok := err.(KeyNotFound); ok {
-				k.UUID = tx.UUID
-				return k
-			}
-			return err
-		}
-
-		found := false
-		for i, e := range list {
-			if e.UUID == tx.Index {
-				// Delete in a stable manner to preserve ordering
-				// of things
-				found = true
-				for j := i; j < len(list)-1; j++ {
-					list[j] = list[j+1]
-				}
-				list = list[:len(list)-1]
-				break
-			}
-		}
-
-		if !found {
-			return KeyNotFound{UUID: tx.UUID, Key: tx.Key, Index: tx.Index}
-		}
-
-		entry.SetList(tx.Key, list)
 	}
 
 	return nil

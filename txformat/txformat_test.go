@@ -17,20 +17,14 @@ func TestBasic(t *testing.T) {
 	uuid, err := store.Add()
 	must(t, err)
 
-	must(t, store.Set(uuid, "test1", "value"))
-	must(t, store.Set(uuid, "test2", "value"))
-	must(t, store.Set(uuid, "test3", "value"))
-	list1value1, err := store.Append(uuid, "list1", "value1")
-	must(t, err)
-	_, err = store.Append(uuid, "list1", "value2")
-	must(t, err)
+	store.Set(uuid, "test1", "value")
+	store.Set(uuid, "test2", "value")
+	store.Set(uuid, "test3", "value")
 
 	// Overwrite
-	must(t, store.Set(uuid, "test1", "notvalue"))
+	store.Set(uuid, "test1", "notvalue")
 	// Delete a key
-	must(t, store.DeleteKey(uuid, "test2"))
-	// Delete from a list
-	must(t, store.DeleteList(uuid, "list1", list1value1))
+	store.DeleteKey(uuid, "test2")
 
 	// Update the snapshot
 	must(t, store.UpdateSnapshot())
@@ -39,17 +33,17 @@ func TestBasic(t *testing.T) {
 	if !ok {
 		t.Fatal(uuid, "was never added to snapshot")
 	}
-	if got := entry["test1"].(string); got != "notvalue" {
+	if got := entry["test1"]; got != "notvalue" {
 		t.Error("test1 was wrong:", got)
 	}
 	if _, ok := entry["test2"]; ok {
 		t.Error("test2 should be gone")
 	}
-	if got := entry["test3"].(string); got != "value" {
+	if got := entry["test3"]; got != "value" {
 		t.Error("test3 was wrong:", got)
 	}
 
-	must(t, store.Delete(uuid))
+	store.Delete(uuid)
 	must(t, store.UpdateSnapshot())
 
 	_, ok = store.Snapshot[uuid]
@@ -68,16 +62,12 @@ func TestHistory(t *testing.T) {
 	must(t, err)
 
 	// Intermingle updates that have nothing to do with uuid
-	must(t, store.Set(uuid, "test1", "value"))
-	must(t, store.Set(uuid2, "test1", "value"))
-	must(t, store.Set(uuid, "test2", "value"))
-	must(t, store.Set(uuid2, "test2", "value"))
-	must(t, store.Set(uuid, "test3", "value"))
-	must(t, store.Set(uuid2, "test3", "value"))
-	_, err = store.Append(uuid, "list1", "value1")
-	must(t, err)
-	_, err = store.Append(uuid, "list1", "value2")
-	must(t, err)
+	store.Set(uuid, "test1", "value")
+	store.Set(uuid2, "test1", "value")
+	store.Set(uuid, "test2", "value")
+	store.Set(uuid2, "test2", "value")
+	store.Set(uuid, "test3", "notvalue")
+	store.Set(uuid2, "test3", "notvalue")
 
 	// This isn't necessary for the tests below, just trying to ensure that
 	// it has no bearing on results below
@@ -101,26 +91,28 @@ func TestHistory(t *testing.T) {
 		snap, err := store.SnapshotAt(1)
 		must(t, err)
 
-		entry, ok := snap[uuid]
+		entry1, ok := snap[uuid]
 		if !ok {
 			t.Fatal("object not created")
 		}
-		entries, err := entry.List("list1")
-		if err != nil {
-			t.Fatal(err)
+		if entry1["test3"] != "notvalue" {
+			t.Error("value wrong:", entry1["test3"])
 		}
-		if len(entries) != 1 {
-			t.Error("entries should only be 1 length:", len(entries))
+
+		entry2, ok := snap[uuid2]
+		if !ok {
+			t.Fatal("object not created")
 		}
-		if entries[0].Value != "value1" {
-			t.Error("entry wrong:", entries[0].Value)
+		_, ok = entry2["test3"]
+		if ok {
+			t.Error("should not exist")
 		}
 	})
 
 	t.Run("All", func(t *testing.T) {
 		t.Parallel()
 
-		snap, err := store.SnapshotAt(10)
+		snap, err := store.SnapshotAt(8)
 		must(t, err)
 		if _, ok := snap[uuid]; ok {
 			t.Fatal("object should not be created")
@@ -132,22 +124,20 @@ func TestHistory(t *testing.T) {
 
 		entry, err := store.EntrySnapshotAt(uuid, 1)
 		must(t, err)
-		entries, err := entry.List("list1")
-		if err != nil {
-			t.Fatal(err)
+
+		if entry["test2"] != "value" {
+			t.Error("value wrong:", entry["test3"])
 		}
-		if len(entries) != 1 {
-			t.Error("entries should only be 1 length:", len(entries))
-		}
-		if entries[0].Value != "value1" {
-			t.Error("entry wrong:", entries[0].Value)
+		_, ok := entry["test3"]
+		if ok {
+			t.Error("should not exist")
 		}
 	})
 
 	t.Run("EntryAll", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := store.EntrySnapshotAt(uuid, 6)
+		_, err := store.EntrySnapshotAt(uuid, 4)
 		if !IsKeyNotFound(err) {
 			t.Error("it should be a key not found error:", err)
 		}
@@ -172,10 +162,10 @@ func TestMarshal(t *testing.T) {
 	store := new(Store)
 	uuid, err := store.Add()
 	must(t, err)
-	must(t, store.Set(uuid, "test1", "value"))
-	must(t, store.Set(uuid, "test2", "value"))
-	must(t, store.Set(uuid, "test1", "notvalue"))
-	must(t, store.DeleteKey(uuid, "test2"))
+	store.Set(uuid, "test1", "value")
+	store.Set(uuid, "test2", "value")
+	store.Set(uuid, "test1", "notvalue")
+	store.DeleteKey(uuid, "test2")
 	must(t, store.UpdateSnapshot())
 
 	b, err := store.Save()
@@ -190,7 +180,7 @@ func TestMarshal(t *testing.T) {
 	if !ok {
 		t.Error("snapshot did not contain", uuid)
 	}
-	if got := entry["test1"].(string); got != "notvalue" {
+	if got := entry["test1"]; got != "notvalue" {
 		t.Error("test1 was wrong:", got)
 	}
 	if _, ok := entry["test2"]; ok {
@@ -205,12 +195,12 @@ func TestMerge(t *testing.T) {
 		t.Parallel()
 
 		logA := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
 		}
 		logB := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
 		}
 
 		merged, conflicts := Merge(logA, logB, nil)
@@ -226,13 +216,13 @@ func TestMerge(t *testing.T) {
 		t.Parallel()
 
 		logA := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
-			{ID: "3", Time: 3, Kind: TxAdd, UUID: "3"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
+			{Time: 3, Kind: TxAdd, UUID: "3"},
 		}
 		logB := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
 		}
 
 		merged, conflicts := Merge(logA, logB, nil)
@@ -248,24 +238,24 @@ func TestMerge(t *testing.T) {
 		t.Parallel()
 
 		logA := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
-			{ID: "3", Time: 3, Kind: TxAdd, UUID: "3"},
-			{ID: "5", Time: 5, Kind: TxAdd, UUID: "5"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
+			{Time: 3, Kind: TxAdd, UUID: "3"},
+			{Time: 5, Kind: TxAdd, UUID: "5"},
 		}
 		logB := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
-			{ID: "4", Time: 4, Kind: TxAdd, UUID: "4"},
-			{ID: "6", Time: 5 /* intentional */, Kind: TxAdd, UUID: "6"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
+			{Time: 4, Kind: TxAdd, UUID: "4"},
+			{Time: 6, Kind: TxAdd, UUID: "6"},
 		}
 		logC := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
-			{ID: "3", Time: 3, Kind: TxAdd, UUID: "3"},
-			{ID: "4", Time: 4, Kind: TxAdd, UUID: "4"},
-			{ID: "5", Time: 5, Kind: TxAdd, UUID: "5"},
-			{ID: "6", Time: 5 /* intentional */, Kind: TxAdd, UUID: "6"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
+			{Time: 3, Kind: TxAdd, UUID: "3"},
+			{Time: 4, Kind: TxAdd, UUID: "4"},
+			{Time: 5, Kind: TxAdd, UUID: "5"},
+			{Time: 6, Kind: TxAdd, UUID: "6"},
 		}
 
 		merged, conflicts := Merge(logA, logB, nil)
@@ -281,15 +271,15 @@ func TestMerge(t *testing.T) {
 		t.Parallel()
 
 		logA := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "3", Time: 3, Kind: TxSet, UUID: "1", Key: "a", Value: "b"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 3, Kind: TxSetKey, UUID: "1", Key: "a", Value: "b"},
 		}
 		logB := []Tx{
-			{ID: "2", Time: 2, Kind: TxDelete, UUID: "1"},
+			{Time: 2, Kind: TxDelete, UUID: "1"},
 		}
 		logDelete := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "2", Time: 2, Kind: TxDelete, UUID: "1"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxDelete, UUID: "1"},
 		}
 
 		merged, conflicts := Merge(logA, logB, nil)
@@ -302,10 +292,10 @@ func TestMerge(t *testing.T) {
 		}
 
 		c := conflicts[0]
-		if c.DeleteTx.ID != logB[0].ID {
+		if c.DeleteTx.Time != logB[0].Time {
 			t.Error("delete tx wrong")
 		}
-		if c.SetTx.ID != logA[1].ID {
+		if c.SetTx.Time != logA[1].Time {
 			t.Error("set tx wrong")
 		}
 
@@ -338,25 +328,25 @@ func TestMerge(t *testing.T) {
 		t.Parallel()
 
 		logA := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
 
 			// Do two sets to see if we get a conflict for each set
-			{ID: "5", Time: 5, Kind: TxSet, UUID: "1", Key: "a", Value: "b"},
-			{ID: "6", Time: 6, Kind: TxSet, UUID: "1", Key: "a", Value: "b"},
+			{Time: 5, Kind: TxSetKey, UUID: "1", Key: "a", Value: "b"},
+			{Time: 6, Kind: TxSetKey, UUID: "1", Key: "a", Value: "b"},
 
-			{ID: "7", Time: 6, Kind: TxSet, UUID: "2", Key: "a", Value: "b"},
-			{ID: "8", Time: 7, Kind: TxSet, UUID: "2", Key: "a", Value: "b"},
+			{Time: 6, Kind: TxSetKey, UUID: "2", Key: "a", Value: "b"},
+			{Time: 7, Kind: TxSetKey, UUID: "2", Key: "a", Value: "b"},
 		}
 		logB := []Tx{
-			{ID: "3", Time: 3, Kind: TxDelete, UUID: "1"},
-			{ID: "4", Time: 4, Kind: TxDelete, UUID: "2"},
+			{Time: 3, Kind: TxDelete, UUID: "1"},
+			{Time: 4, Kind: TxDelete, UUID: "2"},
 		}
 		logDelete := []Tx{
-			{ID: "1", Time: 1, Kind: TxAdd, UUID: "1"},
-			{ID: "2", Time: 2, Kind: TxAdd, UUID: "2"},
-			{ID: "3", Time: 3, Kind: TxDelete, UUID: "1"},
-			{ID: "4", Time: 4, Kind: TxDelete, UUID: "2"},
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
+			{Time: 3, Kind: TxDelete, UUID: "1"},
+			{Time: 4, Kind: TxDelete, UUID: "2"},
 		}
 
 		merged, conflicts := Merge(logA, logB, nil)
@@ -366,16 +356,16 @@ func TestMerge(t *testing.T) {
 		if len(conflicts) != 2 {
 			t.Error("there was", len(conflicts), "conflicts")
 		}
-		if conflicts[0].DeleteTx.ID != "3" {
+		if conflicts[0].DeleteTx.Time != 3 {
 			t.Error("delete id was wrong")
 		}
-		if conflicts[0].SetTx.ID != logA[2].ID {
+		if conflicts[0].SetTx.Time != logA[2].Time {
 			t.Error("set tx was wrong")
 		}
-		if conflicts[1].DeleteTx.ID != "4" {
+		if conflicts[1].DeleteTx.Time != 4 {
 			t.Error("delete id was wrong")
 		}
-		if conflicts[1].SetTx.ID != logA[4].ID {
+		if conflicts[1].SetTx.Time != logA[4].Time {
 			t.Error("set tx was wrong")
 		}
 
@@ -417,8 +407,8 @@ func TestTransactions(t *testing.T) {
 
 	uuid, err := store.Add()
 	must(t, err)
-	must(t, store.Set(uuid, "test1", "value"))
-	must(t, store.Set(uuid, "test2", "value"))
+	store.Set(uuid, "test1", "value")
+	store.Set(uuid, "test2", "value")
 
 	if len(store.Log) != 3 {
 		t.Error("should have 3 txs")
@@ -432,8 +422,8 @@ func TestTransactions(t *testing.T) {
 	store.Begin()
 	uuid, err = store.Add()
 	must(t, err)
-	must(t, store.Set(uuid, "test1", "value"))
-	must(t, store.Set(uuid, "test2", "value"))
+	store.Set(uuid, "test1", "value")
+	store.Set(uuid, "test2", "value")
 
 	if len(store.Log) != 3 {
 		t.Error("should have 3 txs")
@@ -456,8 +446,8 @@ func TestTransactionsDo(t *testing.T) {
 	err := store.Do(func() error {
 		uuid, err := store.Add()
 		must(t, err)
-		must(t, store.Set(uuid, "test1", "value"))
-		must(t, store.Set(uuid, "test2", "value"))
+		store.Set(uuid, "test1", "value")
+		store.Set(uuid, "test2", "value")
 
 		must(t, store.UpdateSnapshot())
 		if store.Snapshot == nil {
@@ -480,8 +470,8 @@ func TestTransactionsDo(t *testing.T) {
 	err = store.Do(func() error {
 		uuid, err := store.Add()
 		must(t, err)
-		must(t, store.Set(uuid, "test1", "value"))
-		must(t, store.Set(uuid, "test2", "value"))
+		store.Set(uuid, "test1", "value")
+		store.Set(uuid, "test2", "value")
 
 		return nil
 	})
@@ -499,12 +489,12 @@ func TestRollbackN(t *testing.T) {
 	store := new(Store)
 	uuid, err := store.Add()
 	must(t, err)
-	must(t, store.Set(uuid, "test1", "value"))
-	must(t, store.Set(uuid, "test2", "value"))
+	store.Set(uuid, "test1", "value")
+	store.Set(uuid, "test2", "value")
 
 	must(t, store.UpdateSnapshot())
 
-	must(t, store.Set(uuid, "test1", "notvalue"))
+	store.Set(uuid, "test1", "notvalue")
 
 	if err := store.RollbackN(5); err == nil {
 		t.Error("expected an error stopping us from rolling back past beginning")
@@ -527,7 +517,7 @@ func TestRollbackN(t *testing.T) {
 	}
 
 	must(t, store.UpdateSnapshot())
-	if got := store.Snapshot[uuid]["test1"].(string); got != "value" {
+	if got := store.Snapshot[uuid]["test1"]; got != "value" {
 		t.Error("the rollback didn't rollback the set, got:", got)
 	}
 	_, ok := store.Snapshot[uuid]["test2"]
@@ -559,7 +549,7 @@ func TestNVersions(t *testing.T) {
 		t.Error("it should have 1 version")
 	}
 
-	must(t, store.Set(uuid, "test1", "value"))
+	store.Set(uuid, "test1", "value")
 
 	if store.NVersions(uuid) != 2 {
 		t.Error("it should have 1 version")
@@ -601,26 +591,17 @@ func randomStore() *Store {
 		keys[i] = uuid.String()
 	}
 
-	arrayKeys := make([]string, 30)
-	for i := range arrayKeys {
-		uuid := uuidpkg.Must(uuidpkg.NewV4())
-		arrayKeys[i] = uuid.String()
-	}
-
 	addedKeys := make(map[string][]string)
-	addedArrayKeys := make(map[string][]string)
 
 	for i := 0; i < 50000; i++ {
-
-		var err error
 	Switch:
 		switch rand.Intn(10) {
-		case 0, 1, 2, 3:
+		default:
 			item := items[rand.Intn(len(items))]
 			key := keys[rand.Intn(len(keys))]
 			value := uuidpkg.Must(uuidpkg.NewV4()).String()
 
-			err = s.Set(item, key, value)
+			s.Set(item, key, value)
 
 			akeys, ok := addedKeys[item]
 			if !ok {
@@ -635,31 +616,7 @@ func randomStore() *Store {
 			}
 
 			addedKeys[item] = append(akeys, key)
-		case 4, 5, 6, 7:
-			item := items[rand.Intn(len(items))]
-			key := arrayKeys[rand.Intn(len(arrayKeys))]
-			value := uuidpkg.Must(uuidpkg.NewV4()).String()
-
-			index, err := s.Append(item, key, value)
-			if err != nil {
-				panic(err)
-			}
-
-			indexKey := item + ":" + key
-			akeys, ok := addedArrayKeys[indexKey]
-			if !ok {
-				addedArrayKeys[item] = []string{key}
-				continue
-			}
-
-			for _, a := range akeys {
-				if a == key {
-					break Switch
-				}
-			}
-
-			addedArrayKeys[item+":"+key] = append(akeys, index)
-		case 8:
+		case 9:
 			item := items[rand.Intn(len(items))]
 
 			akeys := addedKeys[item]
@@ -670,24 +627,7 @@ func randomStore() *Store {
 			akey := akeys[index]
 			akeys[index], akeys[len(akeys)-1] = akeys[len(akeys)-1], akeys[index]
 			addedKeys[item] = akeys[:len(akeys)-1]
-			err = s.DeleteKey(item, akey)
-		case 9:
-			item := items[rand.Intn(len(items))]
-			key := arrayKeys[rand.Intn(len(arrayKeys))]
-			indexKey := item + ":" + key
-
-			akeys := addedArrayKeys[indexKey]
-			if len(akeys) == 0 {
-				continue
-			}
-			index := rand.Intn(len(akeys))
-			akey := akeys[index]
-			akeys[index], akeys[len(akeys)-1] = akeys[len(akeys)-1], akeys[index]
-			addedArrayKeys[indexKey] = akeys[:len(akeys)-1]
-			err = s.DeleteList(item, key, akey)
-		}
-		if err != nil {
-			panic(err)
+			s.DeleteKey(item, akey)
 		}
 	}
 

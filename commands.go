@@ -92,19 +92,13 @@ func (u *uiContext) addNew(name string) (err error) {
 		// Use raw sets here to avoid creating history spam based on timestamp
 		// additions
 		if len(user) != 0 {
-			if err = u.store.Store.Set(uuid, txblob.KeyUser, user); err != nil {
-				return err
-			}
+			u.store.Store.Set(uuid, txblob.KeyUser, user)
 		}
 		if len(email) != 0 {
-			if err = u.store.Store.Set(uuid, txblob.KeyEmail, email); err != nil {
-				return err
-			}
+			u.store.Store.Set(uuid, txblob.KeyEmail, email)
 		}
 		if len(pass) != 0 {
-			if err = u.store.Store.Set(uuid, txblob.KeyPass, pass); err != nil {
-				return err
-			}
+			u.store.Store.Set(uuid, txblob.KeyPass, pass)
 		}
 
 		return nil
@@ -153,9 +147,7 @@ func (u *uiContext) deleteEntry(name string) error {
 	}
 
 	if line == name {
-		if err = u.store.Delete(uuid); err != nil {
-			return err
-		}
+		u.store.Delete(uuid)
 		errColor.Println("DELETED", name)
 	} else {
 		errColor.Println("Aborted")
@@ -273,63 +265,18 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		}
 	default:
 		entry := txformat.Entry(blob)
-		kind, ok := entry.Kind(key)
+
+		value, ok := entry[key]
 		if !ok {
-			errColor.Printf("Key %s is not set\n", key)
-			return nil
+			errColor.Printf("%s.%s is not set", blob.Name(), key)
 		}
 
-		switch kind {
-		case txformat.EntryKindString:
-			value, err := entry.String(key)
-			if err != nil {
-				return err
-			}
-
-			if copy {
-				copyToClipboard(value)
-			} else if key == txblob.KeyPass {
-				showHidden(key, value, 0, 0)
-			} else {
-				showKeyValue(key, value, 0, 0)
-			}
-
-		case txformat.EntryKindList:
-			list, err := entry.List(key)
-			if err != nil {
-				return err
-			}
-
-			// Single item
-			if index > 0 {
-				index--
-				if index >= len(list) {
-					errColor.Printf("There are only %d items\n", len(list))
-					return nil
-				}
-
-				if copy {
-					copyToClipboard(list[index].Value)
-				} else if key == txblob.KeyLabels {
-					showKeyValue(fmt.Sprintf("%s[%d]", key, index+1), list[index].Value, 0, 0)
-				} else {
-					showKeyValue(fmt.Sprintf("%s[%d]", key, index+1), "", 0, 0)
-					fmt.Println(list[index].Value)
-				}
-				return nil
-			}
-
-			strs := txformat.ListEntryValues(list)
-
-			if copy && key == txblob.KeyLabels {
-				copyToClipboard(strings.Join(strs, ", "))
-			} else if copy {
-				copyToClipboard(strings.Join(strs, "\n"))
-			} else if key == txblob.KeyLabels {
-				showJoinedSlice(key, strs, 0, 0)
-			} else {
-				showLinedSlice(key, strs, 0, 0)
-			}
+		if copy {
+			copyToClipboard(value)
+		} else if key == txblob.KeyPass {
+			showHidden(key, value, 0, 0)
+		} else {
+			showKeyValue(key, value, 0, 0)
 		}
 	}
 
@@ -370,25 +317,6 @@ func (u *uiContext) set(search, key, value string) error {
 	}
 
 	switch key {
-	case "label", txblob.KeyLabels:
-		labels, err := blob.Labels()
-		if err != nil {
-			errColor.Println("Failed to retrieve labels:", err)
-			return nil
-		}
-
-		labelStrs := txformat.ListEntryValues(labels)
-
-		if !validateLabel(labelStrs, value) {
-			return nil
-		}
-		if _, err = u.store.AddLabel(uuid, value); err != nil {
-			return err
-		}
-	case "note", txblob.KeyNotes:
-		if _, err = u.store.AddNote(uuid, value); err != nil {
-			return err
-		}
 	case "totp", txblob.KeyTwoFactor:
 		if err := u.store.SetTwofactor(uuid, value); err != nil {
 			errColor.Println(err)
@@ -427,18 +355,20 @@ func (u *uiContext) addNoteToEntry(uuid string) error {
 		return err
 	}
 
-	infoColor.Println("Enter note text, two blank lines or ctrl-d to stop")
+	infoColor.Println("Enter note text, two blank lines, ctrl-d or . to stop")
 	var lines []string
 	oneBlank := false
 	for {
 		line, err := u.prompt(">> ")
-		if err == ErrEnd {
+		if err == ErrEnd || line == "." {
 			break
 		} else if err != nil {
 			return err
 		}
 
-		if len(line) == 0 {
+		if line == "." {
+			break
+		} else if len(line) == 0 {
 			if oneBlank {
 				break
 			}
@@ -454,9 +384,7 @@ func (u *uiContext) addNoteToEntry(uuid string) error {
 		lines = append(lines, line)
 	}
 
-	if _, err := u.store.AddNote(uuid, strings.Join(lines, "\n")); err != nil {
-		return err
-	}
+	u.store.Set(uuid, strings.Join(lines, "\n"))
 	infoColor.Println("Updated notes for", blob.Name())
 
 	return nil
@@ -476,14 +404,13 @@ func (u *uiContext) addLabels(search string) error {
 		return err
 	}
 
-	labels, err := blob.Labels()
-	if err != nil {
-		errColor.Println("Failed retrieving labels")
-		return nil
+	labelVal := blob[txblob.KeyLabels]
+	var labels []string
+	if len(labelVal) != 0 {
+		labels = strings.Split(labelVal, ",")
 	}
-	labelStrs := txformat.ListEntryValues(labels)
 
-	infoColor.Println("Enter labels, blank line or ctrl-d to stop")
+	infoColor.Println("Enter labels, blank line, ctrl-d, or . to stop")
 	changed := false
 	for {
 		line, err := u.prompt(">> ")
@@ -493,58 +420,22 @@ func (u *uiContext) addLabels(search string) error {
 			return err
 		}
 
-		if len(line) == 0 {
+		if len(line) == 0 || line == "." {
 			break
 		}
 
-		if !validateLabel(labelStrs, line) {
+		if !validateLabel(labels, line) {
 			continue
 		}
 
 		changed = true
-		if _, err := u.store.AddLabel(uuid, line); err != nil {
-			return err
-		}
+		labels = append(labels, line)
 	}
 
 	if changed {
+		u.store.Set(uuid, txblob.KeyLabels, strings.Join(labels, ","))
 		infoColor.Println("Updated labels for", blob.Name())
 	}
-	return nil
-}
-
-func (u *uiContext) deleteList(search, key string, number int) error {
-	uuid, err := u.findOne(search)
-	if err != nil {
-		return err
-	}
-	if len(uuid) == 0 {
-		return nil
-	}
-
-	blob, err := u.store.Get(uuid)
-	if err != nil {
-		return err
-	}
-
-	list, err := txformat.Entry(blob).List(key)
-	if err != nil {
-		errColor.Println("Failed retrieving list")
-		return nil
-	}
-
-	index := number - 1
-	if index >= len(list) {
-		errColor.Printf("Number %d does not exist (only %d items)\n", number, len(list))
-		return nil
-	}
-
-	if err = u.store.RemoveList(uuid, key, list[index].UUID); err != nil {
-		return err
-	}
-
-	infoColor.Printf("Updated %s for %s\n", key, blob.Name())
-
 	return nil
 }
 
@@ -562,15 +453,16 @@ func (u *uiContext) deleteLabel(search string, label string) error {
 		return err
 	}
 
-	labels, err := blob.Labels()
-	if err != nil {
-		errColor.Println("Failed retrieving labels")
+	labelVal := blob[txblob.KeyLabels]
+	if len(labelVal) == 0 {
+		errColor.Println("Could not find that label")
 		return nil
 	}
 
+	labels := strings.Split(labelVal, ",")
 	index := -1
 	for i, l := range labels {
-		if l.Value == label {
+		if l == label {
 			index = i
 			break
 		}
@@ -581,7 +473,7 @@ func (u *uiContext) deleteLabel(search string, label string) error {
 		return nil
 	}
 
-	if err = u.store.RemoveLabel(uuid, labels[index].UUID); err != nil {
+	if err = u.store.RemoveLabel(uuid, index); err != nil {
 		return err
 	}
 	infoColor.Println("Updated labels for", blob.Name())
@@ -742,7 +634,7 @@ func (u *uiContext) show(search string, snapshot int) error {
 		// it can end up being nil. But we also don't use Get() here because
 		// it's a protected key and can't be reached with that!
 		entry := txformat.Entry(blob)
-		name, _ := entry.String(txblob.KeyName)
+		name, _ := entry[txblob.KeyName]
 		showKeyValue(txblob.KeyName, name, width, indent)
 	}
 	showKeyValue(txblob.KeyUser, blob.Get(txblob.KeyUser), width, indent)
@@ -755,47 +647,19 @@ func (u *uiContext) show(search string, snapshot int) error {
 		showKeyValue("totp", t, width, indent)
 	}
 
-	labels, err := blob.Labels()
-	if err != nil {
-		fmt.Println("Error fetching labels:", err)
-	} else if len(labels) > 0 {
-		labelStrs := txformat.ListEntryValues(labels)
-		showJoinedSlice(txblob.KeyLabels, labelStrs, width, indent)
-	}
-
-	notes, err := blob.Notes()
-	if err != nil {
-		fmt.Println("Error retrieving notes:", err)
-	} else if len(notes) > 0 {
-		noteStrs := txformat.ListEntryValues(notes)
-		showLinedSlice(txblob.KeyNotes, noteStrs, width, indent)
+	labels := blob.Labels()
+	if len(labels) > 0 {
+		showJoinedSlice(txblob.KeyLabels, labels, width, indent)
 	}
 
 	sort.Strings(arbitrary)
 	for _, k := range arbitrary {
 		entry := txformat.Entry(blob)
-
-		kind, ok := entry.Kind(k)
+		val, ok := entry[k]
 		if !ok {
 			continue
 		}
-
-		switch kind {
-		case txformat.EntryKindList:
-			val, err := entry.List(k)
-			if err != nil {
-				return err
-			}
-			valStrs := txformat.ListEntryValues(val)
-			showLinedSlice(k, valStrs, width, indent)
-		case txformat.EntryKindString:
-			val, err := entry.String(k)
-			if err != nil {
-				return err
-			}
-			showKeyValue(k, val, width, indent)
-		}
-
+		showKeyValue(k, val, width, indent)
 	}
 
 	if update, err := blob.Updated(); err != nil {
@@ -878,43 +742,9 @@ func (u *uiContext) dumpall() error {
 	return nil
 }
 
-func dumpBlob(blob map[string]interface{}, indent int) {
+func dumpBlob(blob map[string]string, indent int) {
 	for k, v := range blob {
-		switch k {
-		case txblob.KeySnapshots:
-			slice, ok := v.([]interface{})
-			if !ok {
-				fmt.Printf("snapshots are the wrong type: %T\n", v)
-				break
-			}
-
-			for i, snap := range slice {
-				snapshot, ok := snap.(map[string]interface{})
-				if !ok {
-					fmt.Printf("snapshot %d is the wrong type: %T\n", i, snap)
-					continue
-				}
-
-				fmt.Printf("snapshot[%d]:\n", i)
-				dumpBlob(snapshot, indent+2)
-			}
-		case txblob.KeyNotes, txblob.KeyLabels:
-			slice, ok := v.([]interface{})
-			if !ok {
-				fmt.Printf("%s are the wrong type: %T\n", k, v)
-				break
-			}
-			for i, s := range slice {
-				str, ok := s.(string)
-				if !ok {
-					fmt.Printf("%s %d is the wrong type: %T\n", k, i, s)
-				}
-				ind := strings.Repeat(" ", indent)
-				fmt.Printf("%s%s[%d]:\n%s%s\n", ind, k, i, ind, str)
-			}
-		default:
-			fmt.Printf("%s%s: %#v\n", strings.Repeat(" ", indent), k, v)
-		}
+		fmt.Printf("%s%s: %#v\n", strings.Repeat(" ", indent), k, v)
 	}
 }
 

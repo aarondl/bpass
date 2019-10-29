@@ -71,12 +71,8 @@ func (b Blobs) RenameDuplicates() (map[string]string, error) {
 
 		renames[oldName] = name
 
-		if err := b.touchUpdated(uuid); err != nil {
-			return nil, err
-		}
-		if err := b.Set(uuid, KeyName, name); err != nil {
-			return nil, err
-		}
+		b.touchUpdated(uuid)
+		b.Set(uuid, KeyName, name)
 	}
 
 	return renames, nil
@@ -150,15 +146,17 @@ func (b Blobs) SearchLabels(labels ...string) (entries SearchResults, err error)
 	for uuid, entry := range b.Store.Snapshot {
 		blob := Blob(entry)
 
-		found := 0
-		for _, w := range labels {
-			haveLabels, err := blob.Labels()
-			if err != nil {
-				return nil, err
-			}
+		lblVal := blob[KeyLabels]
+		if len(lblVal) == 0 {
+			continue
+		}
 
-			for _, h := range haveLabels {
-				if h.Value != w {
+		haveLabels := strings.Split(lblVal, ",")
+
+		found := 0
+		for _, want := range labels {
+			for _, have := range haveLabels {
+				if have != want {
 					continue
 				}
 
@@ -283,12 +281,8 @@ func (b Blobs) New(name string) (uuid string, err error) {
 	if err != nil {
 		return "", err
 	}
-	if err = b.touchUpdated(uuid); err != nil {
-		return "", err
-	}
-	if err = b.Store.Set(uuid, KeyName, name); err != nil {
-		return "", err
-	}
+	b.touchUpdated(uuid)
+	b.Store.Set(uuid, KeyName, name)
 
 	return uuid, nil
 }
@@ -312,10 +306,9 @@ func (b Blobs) Rename(uuid, newName string) error {
 		return errors.New("uuid not found")
 	}
 
-	if err := b.touchUpdated(uuid); err != nil {
-		return err
-	}
-	return b.Store.Set(uuid, KeyName, newName)
+	b.touchUpdated(uuid)
+	b.Store.Set(uuid, KeyName, newName)
+	return nil
 }
 
 // Set the key in name to value, properly updates 'updated' and 'snapshots'.
@@ -329,10 +322,9 @@ func (b Blobs) Set(uuid, key, value string) error {
 		}
 	}
 
-	if err := b.touchUpdated(uuid); err != nil {
-		return err
-	}
-	return b.Store.Set(uuid, key, value)
+	b.touchUpdated(uuid)
+	b.Store.Set(uuid, key, value)
+	return nil
 }
 
 // DeleteKey from an entry, follows the rules of Set() for protected keys.
@@ -342,10 +334,9 @@ func (b Blobs) DeleteKey(uuid, key string) error {
 		return keyNotAllowed(key)
 	}
 
-	if err := b.touchUpdated(uuid); err != nil {
-		return err
-	}
-	return b.Store.DeleteKey(uuid, key)
+	b.touchUpdated(uuid)
+	b.Store.DeleteKey(uuid, key)
+	return nil
 }
 
 // SetTwofactor loads the totpURL to ensure it contains a totp secret key
@@ -375,46 +366,48 @@ func (b Blobs) SetTwofactor(uuid, uriOrKey string) error {
 		return fmt.Errorf("could not set two factor key, uri wouldn't parse: %w", err)
 	}
 
-	if err = b.touchUpdated(uuid); err != nil {
-		return err
-	}
-
-	if err := b.touchUpdated(uuid); err != nil {
-		return err
-	}
-	return b.Store.Set(uuid, KeyTwoFactor, uri)
-}
-
-// AddNote to entry.
-func (b Blobs) AddNote(uuid, note string) (index string, err error) {
-	if err = b.touchUpdated(uuid); err != nil {
-		return "", err
-	}
-	return b.Append(uuid, KeyNotes, note)
-}
-
-// RemoveList deletes index from uuid.key
-func (b Blobs) RemoveList(uuid, key, indexUUID string) (err error) {
-	if err = b.touchUpdated(uuid); err != nil {
-		return err
-	}
-	return b.DeleteList(uuid, key, indexUUID)
+	b.touchUpdated(uuid)
+	b.Store.Set(uuid, KeyTwoFactor, uri)
+	return nil
 }
 
 // AddLabel to entry.
-func (b Blobs) AddLabel(uuid, label string) (index string, err error) {
-	if err = b.touchUpdated(uuid); err != nil {
-		return "", err
-	}
-	return b.Append(uuid, KeyLabels, label)
-}
-
-// RemoveLabel from uuid using the list element's uuid
-func (b Blobs) RemoveLabel(uuid, indexUUID string) (err error) {
-	if err = b.touchUpdated(uuid); err != nil {
+func (b Blobs) AddLabel(uuid, label string) (err error) {
+	entry, err := b.Get(uuid)
+	if err != nil {
 		return err
 	}
-	return b.DeleteList(uuid, KeyLabels, indexUUID)
+
+	labelVal := entry[KeyLabels]
+	if len(labelVal) == 0 {
+		labelVal = label
+	} else {
+		labels := strings.Split(labelVal, ",")
+		labels = append(labels, label)
+		labelVal = strings.Join(labels, ",")
+	}
+
+	b.touchUpdated(uuid)
+	return b.Set(uuid, KeyLabels, labelVal)
+}
+
+// RemoveLabel from uuid using the list element's index
+func (b Blobs) RemoveLabel(uuid string, index int) (err error) {
+	entry, err := b.Get(uuid)
+	if err != nil {
+		return err
+	}
+
+	labels := strings.Split(entry[KeyLabels], ",")
+	if index >= len(labels) {
+		return errors.New("index out of range")
+	}
+
+	copy(labels[index:], labels[index-1:])
+	labels = labels[:len(labels)-1]
+
+	b.touchUpdated(uuid)
+	return b.Set(uuid, KeyLabels, strings.Join(labels, ","))
 }
 
 // NewSync creates a new blob with a unique name to have values set on it before
@@ -440,6 +433,6 @@ func (b Blobs) NewSync(kind string) (uuid string, err error) {
 }
 
 // touchUpdated refreshes the updated timestamp for the given item
-func (b Blobs) touchUpdated(uuid string) error {
-	return b.Store.Set(uuid, KeyUpdated, strconv.FormatInt(time.Now().UnixNano(), 10))
+func (b Blobs) touchUpdated(uuid string) {
+	b.Store.Set(uuid, KeyUpdated, strconv.FormatInt(time.Now().UnixNano(), 10))
 }

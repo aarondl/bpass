@@ -49,7 +49,7 @@ func (b Blob) Name() string {
 		panic("name was not set")
 	}
 
-	return name.(string)
+	return name
 }
 
 // Get a specific value. Panics if name is not found. Special keys require the
@@ -61,12 +61,7 @@ func (b Blob) Get(key string) string {
 		}
 	}
 
-	intf, ok := b[key]
-	if !ok {
-		return ""
-	}
-
-	return intf.(string)
+	return b[key]
 }
 
 // TwoFactor returns an authentication code if a secret key has been set.
@@ -76,13 +71,12 @@ func (b Blob) Get(key string) string {
 //
 // This uses the TOTP algorithm (Google-Authenticator like).
 func (b Blob) TwoFactor() (string, error) {
-	twoFactorURIIntf := b[KeyTwoFactor]
+	twoFactorURI := b[KeyTwoFactor]
 
-	if twoFactorURIIntf == nil {
+	if len(twoFactorURI) == 0 {
 		return "", nil
 	}
 
-	twoFactorURI := twoFactorURIIntf.(string)
 	key, err := otp.NewKeyFromURL(twoFactorURI)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse two factor uri for %s: %w", b.Name(), err)
@@ -101,22 +95,14 @@ func (b Blob) TwoFactor() (string, error) {
 	return code, nil
 }
 
-// Notes for the blob, returns nil if not set
-func (b Blob) Notes() (notes []txformat.ListEntry, err error) {
-	notes, err = txformat.Entry(b).List(KeyNotes)
-	if err != nil && txformat.IsKeyNotFound(err) {
-		err = nil
+// Labels for the blob
+func (b Blob) Labels() []string {
+	labelVal := b[KeyLabels]
+	if len(labelVal) == 0 {
+		return nil
 	}
-	return notes, err
-}
 
-// Labels for the blob, nil if none set.
-func (b Blob) Labels() (labels []txformat.ListEntry, err error) {
-	labels, err = txformat.Entry(b).List(KeyLabels)
-	if err != nil && txformat.IsKeyNotFound(err) {
-		err = nil
-	}
-	return labels, err
+	return strings.Split(labelVal, ",")
 }
 
 // Updated timestamp, if not set it will be time's zero value, returns an error
@@ -125,20 +111,10 @@ func (b Blob) Updated() (time.Time, error) {
 	return b.getTimestamp(KeyUpdated)
 }
 
-// LastSync timestamp, if not set it will be time's zero value, returns an error
-// if the underlying type was wrong.
-func (b Blob) LastSync() (time.Time, error) {
-	return b.getTimestamp(KeyLastSync)
-}
-
 func (b Blob) getTimestamp(key string) (time.Time, error) {
-	timestamp, err := txformat.Entry(b).String(key)
-	if err != nil {
-		if txformat.IsKeyNotFound(err) {
-			return time.Time{}, nil
-		}
-
-		return time.Time{}, err
+	timestamp, ok := txformat.Entry(b)[key]
+	if !ok {
+		return time.Time{}, nil
 	}
 
 	ts, err := strconv.ParseInt(timestamp, 10, 64)

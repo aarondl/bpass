@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+
+	"github.com/aarondl/bpass/txblob"
 )
 
 func (u *uiContext) openurl(search string) error {
@@ -21,7 +23,7 @@ func (u *uiContext) openurl(search string) error {
 		return err
 	}
 
-	link := blob.Get("url")
+	link := blob.Get(txblob.KeyURL)
 	if len(link) == 0 {
 		errColor.Printf("url not set on %s\n", blob.Name())
 		return nil

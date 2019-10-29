@@ -93,7 +93,7 @@ func importLastpass(u *uiContext) error {
 			}
 		}
 		if len(record[0]) != 0 {
-			if err = u.store.Store.Set(uuid, "url", record[0]); err != nil {
+			if err = u.store.Store.Set(uuid, txblob.KeyURL, record[0]); err != nil {
 				return err
 			}
 		}

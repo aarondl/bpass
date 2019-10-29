@@ -12,6 +12,7 @@ const (
 	// User level known keys
 	KeyUser      = "user"
 	KeyEmail     = "email"
+	KeyURL       = "url"
 	KeyPass      = "pass"
 	KeyTwoFactor = "twofactor"
 	KeyNotes     = "notes"
@@ -19,14 +20,9 @@ const (
 
 	// Synchronization keys in user data
 	KeySync       = "sync"
-	KeySyncKind   = "synckind"
 	KeyPriv       = "privkey"
 	KeyPub        = "pubkey"
-	KeyHost       = "host"
-	KeyPort       = "port"
-	KeyPath       = "path"
 	KeyKnownHosts = "knownhosts"
-	KeyLastSync   = "lastsync"
 )
 
 const (
@@ -49,12 +45,8 @@ var (
 		KeyLabels,
 
 		KeySync,
-		KeySyncKind,
 		KeyPriv,
 		KeyPub,
-		KeyHost,
-		KeyPort,
-		KeyPath,
 		KeyKnownHosts,
 	}
 
@@ -69,8 +61,5 @@ var (
 
 		// Dates
 		KeyUpdated,
-
-		// Slices
-		KeyNotes, KeyLabels, KeyKnownHosts,
 	}
 )

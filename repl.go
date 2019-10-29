@@ -7,54 +7,54 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aarondl/bpass/blobformat"
-	"github.com/aarondl/bpass/txblob"
+	"github.com/aarondl/bpass/txformat"
 
 	"github.com/gookit/color"
 )
 
-var replHelp = `Commands:
+const replHelp = `Bpass repl uses analogs to basic unix commands for general
+familiarity and brevity however it's important to note that there's no actual
+directory hierarchy, you can however "cd" into an entry to omit specifying
+the entry query in key commands.
+
+Global Commands:
  passwd          - Change the file's password
+ sync            - Synchronize the file with all sources (pull, merge, push)
+ sync add <ssh>  - Add a sync entry (does ssh keygen)
+
+Entry Commands:
  add <name>      - Add a new entry
  rm  <name>      - Delete an entry
  mv  <old> <new> - Rename an entry
- ls  [search]    - Search for entries, leave [search] blank to list all entries
- cd  [search]    - "cd" into an entry, omit argument to return to root
- labels <lbl...> - Search entries by labels (entry must have all given labels)
+ ls  [query]     - Lists entries, query restricts entries to a fuzzy match
+ cd  [query]     - "cd" into an entry, omit argument to return to root
+ labels <lbl...> - List entries by labels (entry must have all given labels)
 
-CD aware commands (omit name|search when cd'd into entry):
- show <search> [snapshot]    - Dump the entire entry (optionally at a specific snapshot)
- set  <search> <key> <value> - Set a value on an entry (set pass can omit value to use generator)
- get  <search> <key> [index] - Show a specific part of an entry (lists can use index)
- cp   <search> <key> [index] - Copy a specific part of an entry to the clipboard (lists can use index)
- open <search>               - Open url key using the browser (linux only atm, xdg-open shell out)
+Key commands (cd <query> to omit query from these commands):
+ show <query> [snapshot]    - Show all keys for an entry (optionally at a specific snapshot)
+ set  <query> <key> [value] - Set a value on an entry (omit value for multi-line or password gen)
+ get  <query> <key>         - Show a specific key of an entry (lists can use index)
+ cp   <query> <key>         - Copy a specific key of an entry to the clipboard (lists can use index)
+ edit <query> <key>         - Open $EDITOR to edit an existing value
+ open <query>               - Launch browser using value in url key (requires xdg-open)
+ rmk  <query> <key>         - Delete a key from an entry
 
- rmk <search> <key>          - Delete a key from an entry
- rml <search> <key> <index>  - Delete an item from a list at index
+ label   <query>            - Add labels in an easier way than with set
+ rmlabel <query> <label>    - Remove labels in an easier way than with edit
 
- note    <search>            - Add a note
- rmnote  <search> <index>    - Delete a note (alias: rml <search> notes <index>)
- label   <search>            - Add labels
- rmlabel <search> <label>    - Remove a label
-
-Clipboard copy shortcuts (equivalent to cp name CMD):
- pass  <search>       - Copy password to clipboard
- user  <search>       - Copy username to clipboard
- email <search>       - Copy email to clipboard
- totp  <search>       - Copy twofactor to clipboard
-
-Sync commands:
- sync              - Synchronize the file with all sources (pull, merge, push)
- sync add <ssh>    - Add an automatic synchronization option
- sync rm  <name>   - Removes automatic synchronization (alias: rml sync/master sync <index>)
+Clipboard copy shortcuts (alias of cp <query> <key>):
+ pass  <query>       - Copy password to clipboard
+ user  <query>       - Copy username to clipboard
+ email <query>       - Copy email to clipboard
+ totp  <query>       - Copy twofactor to clipboard
 
 Debug commands:
- dump <search>     - Dumps an entire entry in debug mode
+ dump <query>      - Dumps an entire entry in debug mode
  dumpall           - Dumps the entire store in debug mode
 
 Common Arguments:
   name:   a fully qualified name
-  search: a fuzzy search (breaks on / for pseudo-folder structuring)
+  query:  a fuzzy search (breaks on / for pseudo-folder structuring)
   index:  the number representing the item, not 0-based
 `
 
@@ -145,29 +145,6 @@ func (r *repl) run() error {
 
 			err = r.ctx.deleteKey(name, splits[0])
 
-		case "rml":
-			name := r.ctxEntry
-			if len(splits) < 2 || (len(name) == 0 && len(splits) < 3) {
-				errColor.Println("syntax: rml <search> <key> <index>\n")
-				continue
-			}
-
-			if len(name) == 0 {
-				name = splits[0]
-				splits = splits[1:]
-			}
-
-			key := splits[0]
-			splits = splits[1:]
-
-			number, err := strconv.Atoi(splits[0])
-			if err != nil {
-				errColor.Printf("%q is not a number\n", splits[0])
-				continue
-			}
-
-			err = r.ctx.deleteList(name, key, number)
-
 		case "ls":
 			search := ""
 			if len(splits) != 0 {
@@ -227,7 +204,7 @@ func (r *repl) run() error {
 
 			err = r.ctx.get(name, key, index, cmd == "cp")
 
-		case "totp", blobformat.KeyUser, blobformat.KeyPass, blobformat.KeyEmail:
+		case "totp", txformat.KeyUser, txformat.KeyPass, txformat.KeyEmail:
 			name := r.ctxEntry
 			if len(splits) < 1 && len(name) == 0 {
 				errColor.Printf("syntax: %s <search>\n", cmd)
@@ -327,38 +304,6 @@ func (r *repl) run() error {
 
 			err = r.ctx.openurl(name)
 
-		case "note":
-			name := r.ctxEntry
-			if len(name) == 0 {
-				if len(splits) == 0 {
-					errColor.Println("syntax: note <search>")
-					continue
-				}
-				name = splits[0]
-			}
-
-			err = r.ctx.addNote(name)
-
-		case "rmnote":
-			name := r.ctxEntry
-			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
-				errColor.Println("syntax: rmnote <search> <index>")
-				continue
-			}
-
-			if len(name) == 0 {
-				name = splits[0]
-				splits = splits[1:]
-			}
-
-			number, err := strconv.Atoi(splits[0])
-			if err != nil {
-				errColor.Printf("%q is not a number\n", splits[0])
-				continue
-			}
-
-			err = r.ctx.deleteList(name, txblob.KeyNotes, number)
-
 		case "label":
 			name := r.ctxEntry
 			if len(name) == 0 {
@@ -407,7 +352,7 @@ func (r *repl) run() error {
 
 			}
 			if len(splits) != 0 {
-				// THe user gave us a snapshot ^_^
+				// The user gave us a snapshot ^_^
 				snapshot, err = strconv.Atoi(splits[0])
 				if err != nil {
 					snapshot = 0
@@ -422,8 +367,6 @@ func (r *repl) run() error {
 				switch splits[0] {
 				case "add":
 					err = r.ctx.syncAdd(kind)
-				case "rm":
-					err = r.ctx.syncRemove(kind)
 				default:
 					errColor.Println("syntax: sync add <kind>")
 				}
