@@ -14,6 +14,10 @@ func OpenURL(uri string) error {
 		return errors.New("could not find open in path")
 	}
 
+	attrs := &os.ProcAttr{
+		Files: []*os.File{nil, nil, nil},
+	}
+
 	process, err := os.StartProcess(command, []string{command, uri}, attrs)
 	if err != nil {
 		return fmt.Errorf("error starting open: %w", err)
