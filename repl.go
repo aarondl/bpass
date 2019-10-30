@@ -19,6 +19,7 @@ Global Commands:
  passwd          - Change the file's password
  sync            - Synchronize the file with all sources (pull, merge, push)
  sync add <scp>  - Add a sync entry (does ssh keygen)
+ exit            - Exit the repl
 
 Entry Commands:
  add <name>      - Add a new entry
@@ -378,6 +379,10 @@ func (r *repl) run() error {
 
 		case "help":
 			fmt.Println(replHelp)
+
+		case "exit":
+			return nil
+
 		default:
 			unknownCmd = true
 		}
