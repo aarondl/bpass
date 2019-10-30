@@ -143,6 +143,12 @@ func (u *uiContext) loadBlob() error {
 		if pwd != verify {
 			return errors.New("passphrases did not match")
 		}
+
+		// Derive a new key from the password for later encryption
+		u.key, u.salt, err = crypt.DeriveKey(cryptVersion, []byte(pwd))
+		if err != nil {
+			return err
+		}
 	} else {
 		pwd, err = u.term.LineHidden(inputPromptColor.Sprintf("%s passphrase: ", u.shortFilename))
 		if err != nil {
@@ -155,12 +161,14 @@ func (u *uiContext) loadBlob() error {
 			return err
 		}
 
-		_, pt, err := crypt.Decrypt([]byte(pwd), payload)
+		meta, pt, err := crypt.Decrypt([]byte(pwd), payload)
 		if err != nil {
 			return err
 		}
 
 		u.pass = pwd
+		u.key = meta.Key
+		u.salt = meta.Salt
 
 		store, err := txformat.New(pt)
 		if err != nil {
@@ -168,12 +176,6 @@ func (u *uiContext) loadBlob() error {
 		}
 
 		u.store = txblob.Blobs{Store: store}
-	}
-
-	// Derive a new key from the password for later encryption
-	u.key, u.salt, err = crypt.DeriveKey(cryptVersion, []byte(pwd))
-	if err != nil {
-		return err
 	}
 
 	// It's possible the store was empty/null even on a load, just create it

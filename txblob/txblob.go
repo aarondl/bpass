@@ -23,25 +23,6 @@ func (b Blob) Keys() (keys []string) {
 	return keys
 }
 
-// ArbitraryKeys returns all keys that are unknown to this package
-func (b Blob) ArbitraryKeys() (keys []string) {
-	for k := range b {
-		found := false
-		for _, search := range knownKeys {
-			if search == k {
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			keys = append(keys, k)
-		}
-	}
-
-	return keys
-}
-
 // Name returns the name of the blob. Panics if the key is not found.
 func (b Blob) Name() string {
 	name, ok := b[KeyName]

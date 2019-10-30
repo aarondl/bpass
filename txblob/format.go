@@ -4,17 +4,15 @@ package txblob
 // Keys for the map
 const (
 	// System level keys (things that allow the system to work)
-	KeyName      = "name"
-	KeyDeleted   = "deleted"
-	KeyUpdated   = "updated"
-	KeySnapshots = "snapshots"
+	KeyName    = "name"
+	KeyUpdated = "updated"
 
 	// User level known keys
 	KeyUser      = "user"
 	KeyEmail     = "email"
 	KeyURL       = "url"
 	KeyPass      = "pass"
-	KeyTwoFactor = "twofactor"
+	KeyTwoFactor = "totp"
 	KeyNotes     = "notes"
 	KeyLabels    = "labels"
 
@@ -33,9 +31,7 @@ var (
 	// known keys is a list of all known keys
 	knownKeys = []string{
 		KeyName,
-		KeyDeleted,
 		KeyUpdated,
-		KeySnapshots,
 
 		KeyUser,
 		KeyEmail,
@@ -57,7 +53,6 @@ var (
 
 		// Forbidden
 		KeyName,
-		KeySnapshots,
 
 		// Dates
 		KeyUpdated,

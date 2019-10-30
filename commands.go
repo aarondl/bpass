@@ -3,6 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +20,7 @@ import (
 	"github.com/aarondl/bpass/txformat"
 
 	"github.com/atotto/clipboard"
+	uuidpkg "github.com/gofrs/uuid"
 	"github.com/gookit/color"
 )
 
@@ -179,7 +186,7 @@ func (u *uiContext) deleteKey(search, key string) error {
 		}
 	}
 
-	infoColor.Println("deleted", key)
+	infoColor.Println("deleted", key, "key")
 	return nil
 }
 
@@ -229,7 +236,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 	}
 
 	switch key {
-	case "totp", txblob.KeyTwoFactor:
+	case txblob.KeyTwoFactor:
 		val, err := blob.TwoFactor()
 		if err != nil {
 			errColor.Println(err)
@@ -237,13 +244,13 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		}
 
 		if len(val) == 0 {
-			errColor.Println("twofactor is not set for", blob.Name())
+			errColor.Println("totp is not set for", blob.Name())
 		}
 
 		if copy {
 			copyToClipboard(val)
 		} else {
-			showKeyValue("totp", val, 0, 0)
+			fmt.Println(val)
 		}
 	case txblob.KeyUpdated:
 		value, err := blob.Updated()
@@ -254,14 +261,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		if copy {
 			copyToClipboard(val)
 		} else {
-			showKeyValue("updated", val, 0, 0)
-		}
-	case txblob.KeySnapshots:
-		n := u.store.NVersions(uuid)
-		if copy {
-			copyToClipboard(strconv.Itoa(n))
-		} else {
-			showKeyValue("snaps", strconv.Itoa(n), 0, 0)
+			fmt.Println(val)
 		}
 	default:
 		entry := txformat.Entry(blob)
@@ -273,10 +273,8 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 
 		if copy {
 			copyToClipboard(value)
-		} else if key == txblob.KeyPass {
-			showHidden(key, value, 0, 0)
 		} else {
-			showKeyValue(key, value, 0, 0)
+			fmt.Println(value)
 		}
 	}
 
@@ -292,44 +290,28 @@ func (u *uiContext) set(search, key, value string) error {
 		return nil
 	}
 
-	blob, err := u.store.Get(uuid)
-	if err != nil {
-		return err
-	}
-
-	if key == txblob.KeyPass {
-		if len(value) == 0 {
-			var err error
-			value, err = u.getPassword()
-			if err != nil {
-				return err
-			}
-		}
-
-		if len(value) != 0 {
-			if err = u.store.Set(uuid, key, value); err != nil {
-				return err
-			}
-			infoColor.Println("Updated password for", blob.Name())
+	if key == txblob.KeyPass && len(value) == 0 {
+		value, err = u.getPassword()
+		if err != nil {
+			return err
 		}
 
 		return nil
+	} else if len(value) == 0 {
+		value, err = u.promptMultiline(inputPromptColor.Sprint("> "))
+		if err != nil {
+			return err
+		}
 	}
 
 	switch key {
-	case "totp", txblob.KeyTwoFactor:
+	case txblob.KeyTwoFactor:
 		if err := u.store.SetTwofactor(uuid, value); err != nil {
 			errColor.Println(err)
 			return nil
 		}
-	case txblob.KeyUpdated, txblob.KeySnapshots,
-		txblob.KeyLastSync, txblob.KeyPriv, txblob.KeyPub:
-
-		errColor.Printf("%s cannot be set manually\n", key)
 	default:
-		if err = u.store.Set(uuid, key, value); err != nil {
-			return err
-		}
+		u.store.Set(uuid, key, value)
 	}
 
 	infoColor.Printf("set %s = %s\n", key, value)
@@ -337,7 +319,7 @@ func (u *uiContext) set(search, key, value string) error {
 	return nil
 }
 
-func (u *uiContext) addNote(search string) error {
+func (u *uiContext) edit(search, key string) error {
 	uuid, err := u.findOne(search)
 	if err != nil {
 		return err
@@ -346,46 +328,105 @@ func (u *uiContext) addNote(search string) error {
 		return nil
 	}
 
-	return u.addNoteToEntry(uuid)
-}
-
-func (u *uiContext) addNoteToEntry(uuid string) error {
 	blob, err := u.store.Get(uuid)
+	if err != nil {
+		errColor.Println(err)
+		return nil
+	}
+
+	// Create UUID filename
+	fuuid, err := uuidpkg.NewV4()
 	if err != nil {
 		return err
 	}
+	fname := filepath.Join(os.TempDir(), "bp"+fuuid.String())
 
-	infoColor.Println("Enter note text, two blank lines, ctrl-d or . to stop")
-	var lines []string
-	oneBlank := false
-	for {
-		line, err := u.prompt(">> ")
-		if err == ErrEnd || line == "." {
-			break
-		} else if err != nil {
-			return err
-		}
-
-		if line == "." {
-			break
-		} else if len(line) == 0 {
-			if oneBlank {
-				break
-			}
-			oneBlank = true
-			continue
-		}
-
-		if oneBlank {
-			lines = append(lines, "")
-			oneBlank = false
-		}
-
-		lines = append(lines, line)
+	// Open file, ensure it doesn't exist with locked down user perms
+	tmp, err := os.OpenFile(fname, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
+	if err != nil {
+		errColor.Println("failed to open tmp file to edit value")
+		return nil
 	}
 
-	u.store.Set(uuid, strings.Join(lines, "\n"))
-	infoColor.Println("Updated notes for", blob.Name())
+	// Close and delete the file at the end
+	defer func() {
+		tmp.Close()
+		err = os.Remove(fname)
+		if err != nil {
+			errColor.Println("failed to remove tmp file:", fname)
+		}
+	}()
+
+	// Write the old value
+	oldValue := blob[key]
+	if len(oldValue) != 0 {
+		if _, err = io.WriteString(tmp, oldValue); err != nil {
+			errColor.Println("failed to write to tmp file")
+		}
+	}
+	maxLen := len(oldValue)
+
+	// At this point, we want to ensure that we wipe the file of any
+	// data that was inside it. So we write max(len(oldValue),len(newValue))
+	// bytes to the file before deletion.
+	defer func() {
+		if maxLen == 0 {
+			return
+		}
+
+		if _, err = tmp.Seek(0, os.SEEK_SET); err != nil {
+			errColor.Println("failed to seek in file:", err)
+			return
+		}
+
+		if _, err = tmp.Write(make([]byte, maxLen)); err != nil {
+			errColor.Println("failed to zero the tmp file:", err)
+		}
+	}()
+
+	// Run the editor
+	editor := os.Getenv("EDITOR")
+	if len(editor) == 0 && runtime.GOOS == "windows" {
+		editor = "notepad"
+	} else {
+		editor = "vim"
+	}
+
+	cmd := exec.Command(editor, fname)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		e, ok := err.(*exec.ExitError)
+		if ok {
+			errColor.Printf("editor exit non-zero (%d), not saving value\n", e.ExitCode())
+			return nil
+		}
+	}
+
+	// Read the file back now that the editor's done
+	if _, err = tmp.Seek(0, os.SEEK_SET); err != nil {
+		errColor.Println("failed to seek in file:", err)
+		return nil
+	}
+
+	newValue, err := ioutil.ReadAll(tmp)
+	if err != nil {
+		errColor.Println("failed to read from tmp file:", err)
+		return nil
+	}
+
+	if len(newValue) > maxLen {
+		maxLen = len(newValue)
+	}
+
+	if len(newValue) == 0 {
+		infoColor.Println("erasing value")
+		u.store.DeleteKey(uuid, key)
+	} else {
+		infoColor.Printf("set %s\n", key)
+		u.store.Set(uuid, key, string(newValue))
+	}
 
 	return nil
 }
@@ -413,7 +454,7 @@ func (u *uiContext) addLabels(search string) error {
 	infoColor.Println("Enter labels, blank line, ctrl-d, or . to stop")
 	changed := false
 	for {
-		line, err := u.prompt(">> ")
+		line, err := u.prompt(inputPromptColor.Sprint("> "))
 		if err == ErrEnd {
 			break
 		} else if err != nil {
@@ -609,19 +650,10 @@ func (u *uiContext) show(search string, snapshot int) error {
 		blob = txblob.Blob(entry)
 	}
 
-	width := 8 // Hardcoded max of the known keys, sad, I know
-	arbitrary := blob.ArbitraryKeys()
-	// Add back some known keys because we don't give a crap when they're
-	// displayed
-	arbitrary = append(arbitrary,
-		txblob.KeySync,
-		txblob.KeySyncKind,
-		txblob.KeyKnownHosts,
-		txblob.KeyPub,
-		txblob.KeyPath,
-		txblob.KeyHost,
-		txblob.KeyPort)
-	for _, k := range arbitrary {
+	// Figure out the max width of the key names
+	width := 8
+	keys := blob.Keys()
+	for _, k := range keys {
 		if len(k) > width {
 			width = len(k) + 1 // +1 for : character
 		}
@@ -629,37 +661,61 @@ func (u *uiContext) show(search string, snapshot int) error {
 	width *= -1
 	indent := 2
 
-	if snapshot != 0 {
-		// We don't use .Name() helper because when digging into history
-		// it can end up being nil. But we also don't use Get() here because
-		// it's a protected key and can't be reached with that!
-		entry := txformat.Entry(blob)
-		name, _ := entry[txblob.KeyName]
-		showKeyValue(txblob.KeyName, name, width, indent)
-	}
-	showKeyValue(txblob.KeyUser, blob.Get(txblob.KeyUser), width, indent)
-	showKeyValue(txblob.KeyEmail, blob.Get(txblob.KeyEmail), width, indent)
-	showHidden(txblob.KeyPass, blob.Get(txblob.KeyPass), width, indent)
-	t, err := blob.TwoFactor()
-	if err != nil {
-		fmt.Println("Error retrieving two factor:", err)
-	} else if len(t) != 0 {
-		showKeyValue("totp", t, width, indent)
+	// Do these first
+	ordering := []string{
+		txblob.KeyName,
+		txblob.KeyUser,
+		txblob.KeyEmail,
+		txblob.KeyPass,
+		txblob.KeyTwoFactor,
+		txblob.KeyLabels,
+		txblob.KeyNotes,
 	}
 
-	labels := blob.Labels()
-	if len(labels) > 0 {
-		showJoinedSlice(txblob.KeyLabels, labels, width, indent)
+	// Delete the ordering ones out of keys
+	for _, o := range ordering {
+		for i, k := range keys {
+			if o == k {
+				keys[i] = keys[len(keys)-1]
+				keys = keys[:len(keys)-1]
+				break
+			}
+		}
 	}
+	sort.Strings(keys)
+	keys = append(ordering, keys...)
 
-	sort.Strings(arbitrary)
-	for _, k := range arbitrary {
+	for _, k := range keys {
+		if k == txblob.KeyUpdated {
+			// Special case, this one shows up at the end
+			continue
+		}
+
 		entry := txformat.Entry(blob)
 		val, ok := entry[k]
 		if !ok {
 			continue
 		}
-		showKeyValue(k, val, width, indent)
+
+		switch k {
+		case txblob.KeyPass:
+			showHidden(txblob.KeyPass, blob.Get(txblob.KeyPass), width, indent)
+		case txblob.KeyLabels:
+			showKeyValue(k, strings.ReplaceAll(val, ",", ", "), width, indent)
+		case txblob.KeyTwoFactor:
+			t, err := blob.TwoFactor()
+			if err != nil {
+				fmt.Println("Error retrieving two factor:", err)
+			} else if len(t) != 0 {
+				showKeyValue("totp", t, width, indent)
+			}
+		default:
+			if strings.ContainsRune(val, '\n') {
+				showMultiline(k, val, width, indent)
+			} else {
+				showKeyValue(k, val, width, indent)
+			}
+		}
 	}
 
 	if update, err := blob.Updated(); err != nil {
@@ -685,34 +741,18 @@ func showHidden(key, value string, width, indent int) {
 	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, key+":"), passColor.Sprint(value))
 }
 
-func showJoinedSlice(label string, slice []string, width, indent int) {
-	ind := strings.Repeat(" ", indent)
-	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, label+":"), strings.Join(slice, ", "))
-}
+func showMultiline(key string, val string, width, indent int) {
+	lines := strings.Split(val, "\n")
 
-func showLinedSlice(key string, items []string, width, indent int) {
 	lineIndent := indent * 2
 	if lineIndent == 0 {
 		lineIndent += 2
 	}
 	ind := strings.Repeat(" ", indent)
+	lineInd := strings.Repeat(" ", lineIndent)
 
 	fmt.Printf("%s%s\n", ind, keyColor.Sprintf("%*s", width, key+":"))
-	for i, item := range items {
-		showLine(i, item, lineIndent)
-	}
-}
-
-func showLine(number int, item string, indent int) {
-	firstInd := strings.Repeat(" ", indent)
-	otherInd := strings.Repeat(" ", indent+4)
-	for i, line := range strings.Split(item, "\n") {
-		if i == 0 {
-			fmt.Printf("%s%s%s\n", firstInd, keyColor.Sprintf("%-4s", strconv.Itoa(number+1)+":"), line)
-			continue
-		}
-		fmt.Printf("%s%s\n", otherInd, line)
-	}
+	fmt.Println(lineInd + strings.TrimSpace(strings.Join(lines, "\n"+lineInd)))
 }
 
 func (u *uiContext) dump(search string) error {

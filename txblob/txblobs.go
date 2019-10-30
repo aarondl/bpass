@@ -403,11 +403,17 @@ func (b Blobs) RemoveLabel(uuid string, index int) (err error) {
 		return errors.New("index out of range")
 	}
 
-	copy(labels[index:], labels[index-1:])
-	labels = labels[:len(labels)-1]
+	if len(labels) == 1 {
+		b.Store.DeleteKey(uuid, KeyLabels)
+		return nil
+	}
+
+	copy(labels[index:], labels[index+1:])
+	labels = labels[len(labels)-1:]
 
 	b.touchUpdated(uuid)
-	return b.Set(uuid, KeyLabels, strings.Join(labels, ","))
+	b.Store.Set(uuid, KeyLabels, strings.Join(labels, ","))
+	return nil
 }
 
 // NewSync creates a new blob with a unique name to have values set on it before

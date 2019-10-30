@@ -2,13 +2,11 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/aarondl/bpass/txformat"
-
+	"github.com/aarondl/bpass/txblob"
 	"github.com/gookit/color"
 )
 
@@ -20,7 +18,7 @@ the entry query in key commands.
 Global Commands:
  passwd          - Change the file's password
  sync            - Synchronize the file with all sources (pull, merge, push)
- sync add <ssh>  - Add a sync entry (does ssh keygen)
+ sync add <scp>  - Add a sync entry (does ssh keygen)
 
 Entry Commands:
  add <name>      - Add a new entry
@@ -134,7 +132,7 @@ func (r *repl) run() error {
 		case "rmk":
 			name := r.ctxEntry
 			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
-				errColor.Println("syntax: rmk <search> <key>")
+				errColor.Println("syntax: rmk <query> <key>")
 				continue
 			}
 
@@ -146,11 +144,11 @@ func (r *repl) run() error {
 			err = r.ctx.deleteKey(name, splits[0])
 
 		case "ls":
-			search := ""
+			query := ""
 			if len(splits) != 0 {
-				search = splits[0]
+				query = splits[0]
 			}
-			err = r.ctx.list(search)
+			err = r.ctx.list(query)
 
 		case "cd":
 			switch len(splits) {
@@ -180,7 +178,7 @@ func (r *repl) run() error {
 		case "cp", "get":
 			name := r.ctxEntry
 			if len(splits) < 1 || (len(splits) < 2 && len(name) == 0) {
-				errColor.Printf("syntax: %s <search> <key> [index]\n", cmd)
+				errColor.Printf("syntax: %s <query> <key> [index]\n", cmd)
 				continue
 			}
 
@@ -204,10 +202,10 @@ func (r *repl) run() error {
 
 			err = r.ctx.get(name, key, index, cmd == "cp")
 
-		case "totp", txformat.KeyUser, txformat.KeyPass, txformat.KeyEmail:
+		case "totp", txblob.KeyUser, txblob.KeyPass, txblob.KeyEmail:
 			name := r.ctxEntry
 			if len(splits) < 1 && len(name) == 0 {
-				errColor.Printf("syntax: %s <search>\n", cmd)
+				errColor.Printf("syntax: %s <query>\n", cmd)
 				continue
 			}
 
@@ -221,55 +219,30 @@ func (r *repl) run() error {
 		case "set":
 			name := r.ctxEntry
 			var key, value string
-			showHelpErr := false
-			doPassSet := false
 
-			switch len(splits) {
-			case 0:
-				showHelpErr = true
-			case 1:
-				// context is set, and the arg is pass
-				key = splits[0]
-				doPassSet = len(name) != 0 && key == "pass"
-				showHelpErr = !doPassSet
-			case 2:
-				// With two args we have two valid possibilities:
-				// context not set & key == "pass"
-				// set <name> "pass"
-				// context set & key, value
-				// cd <name>; set <key> <value>
-				if len(name) == 0 && splits[1] == "pass" {
-					name = splits[0]
-					key = splits[1]
-					doPassSet = true
-				} else if len(name) != 0 {
-					key, value = splits[0], splits[1]
-				} else {
-					showHelpErr = true
-				}
-			default:
-				// We have at least 3 args so we can fill name/key/value easily
-				if len(name) == 0 {
-					name = splits[0]
-					splits = splits[1:]
-				}
+			// with context:
+			// set key
+			// set key val
+			// without context:
+			// set name key
+			// set name key value
 
-				key = splits[0]
-				value = splits[1]
-				splits = splits[2:]
+			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
+				errColor.Println("syntax: set <query> <key> [value]")
+				continue
 			}
 
-			if showHelpErr {
-				errColor.Println("syntax: set <search> <key> <value>")
-				break
-			} else if doPassSet {
-				err = r.ctx.set(name, key, "")
-				if err == io.EOF {
-					errColor.Println("Aborted")
-				} else if err != nil {
-					break
-				}
-				continue
+			if len(name) == 0 {
+				name = splits[0]
+				splits = splits[1:]
+			}
+
+			key = splits[0]
+			splits = splits[1:]
+
+			if len(splits) != 0 {
+				value = splits[0]
+				splits = splits[1:]
 			}
 
 			if len(splits) > 0 {
@@ -292,11 +265,26 @@ func (r *repl) run() error {
 
 			err = r.ctx.set(name, key, value)
 
+		case "edit":
+			name := r.ctxEntry
+			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
+				errColor.Println("syntax: edit <query> <key>")
+				continue
+			}
+
+			if len(name) == 0 {
+				name = splits[0]
+				splits = splits[1:]
+			}
+
+			key := splits[0]
+			err = r.ctx.edit(name, key)
+
 		case "open":
 			name := r.ctxEntry
 			if len(name) == 0 {
 				if len(splits) == 0 {
-					errColor.Println("syntax: open <search>")
+					errColor.Println("syntax: open <query>")
 					continue
 				}
 				name = splits[0]
@@ -308,7 +296,7 @@ func (r *repl) run() error {
 			name := r.ctxEntry
 			if len(name) == 0 {
 				if len(splits) == 0 {
-					errColor.Println("syntax: label <search>")
+					errColor.Println("syntax: label <query>")
 					continue
 				}
 				name = splits[0]
@@ -319,7 +307,7 @@ func (r *repl) run() error {
 		case "rmlabel":
 			name := r.ctxEntry
 			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
-				errColor.Println("syntax: rmlabel <search> <label>")
+				errColor.Println("syntax: rmlabel <query> <label>")
 				continue
 			}
 
@@ -344,7 +332,7 @@ func (r *repl) run() error {
 			if len(name) == 0 {
 				// We need to get a name
 				if len(splits) == 0 {
-					errColor.Println("syntax: show <search> [snapshot]")
+					errColor.Println("syntax: show <query> [snapshot]")
 					continue
 				}
 				name = splits[0]
@@ -359,6 +347,7 @@ func (r *repl) run() error {
 				}
 			}
 			err = r.ctx.show(name, snapshot)
+
 		case "sync":
 			if len(splits) == 0 {
 				err = r.ctx.sync(false, true)
@@ -376,7 +365,7 @@ func (r *repl) run() error {
 			name := r.ctxEntry
 			if len(name) == 0 {
 				if len(splits) == 0 {
-					errColor.Println("syntax: dump <search>")
+					errColor.Println("syntax: dump <query>")
 					continue
 				}
 				name = splits[0]
@@ -414,23 +403,57 @@ func (u *uiContext) prompt(prompt string) (string, error) {
 	return line, nil
 }
 
+func (u *uiContext) promptMultiline(prompt string) (string, error) {
+	infoColor.Println(`Enter text, 2 empty lines or "." or ctrl-d to stop:`)
+
+	var lines []string
+	oneBlank := false
+	for {
+		line, err := u.prompt(prompt)
+		if err == ErrEnd || line == "." {
+			break
+		} else if err != nil {
+			return "", err
+		}
+
+		if line == "." {
+			break
+		} else if len(line) == 0 {
+			if oneBlank {
+				break
+			}
+			oneBlank = true
+			continue
+		}
+
+		if oneBlank {
+			lines = append(lines, "")
+			oneBlank = false
+		}
+
+		lines = append(lines, line)
+	}
+
+	return strings.Join(lines, "\n"), nil
+}
+
 // findOne returns a uuid iff a single one could be found, else an error
 // message will have been printed to the user.
-func (u *uiContext) findOne(search string) (string, error) {
-	entries, err := u.store.Search(search)
+func (u *uiContext) findOne(query string) (string, error) {
+	entries, err := u.store.Search(query)
 	if err != nil {
 		return "", err
 	}
 
 	switch len(entries) {
 	case 0:
-		errColor.Printf("No matches for search (%q)\n", search)
+		errColor.Printf("No matches for query (%q)\n", query)
 		return "", nil
 	case 1:
 		ids := entries.UUIDs()
 		id := ids[0]
 		name := entries[id]
-		if search != name {
+		if query != name {
 			infoColor.Printf("using: %s\n", name)
 		}
 
@@ -439,14 +462,14 @@ func (u *uiContext) findOne(search string) (string, error) {
 
 	// If there's an exact match use that
 	for u, name := range entries {
-		if name == search {
+		if name == query {
 			return u, nil
 		}
 	}
 
 	names := entries.Names()
 	sort.Strings(names)
-	errColor.Printf("Multiple matches for search (%q):", search)
+	errColor.Printf("Multiple matches for query (%q):", query)
 	fmt.Print("\n  ")
 	fmt.Println(strings.Join(names, "\n  "))
 

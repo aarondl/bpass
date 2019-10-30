@@ -83,34 +83,27 @@ func importLastpass(u *uiContext) error {
 		}
 
 		if len(record[1]) != 0 {
-			if err = u.store.Store.Set(uuid, txblob.KeyUser, record[1]); err != nil {
-				return err
-			}
+			u.store.Store.Set(uuid, txblob.KeyUser, record[1])
 		}
 		if len(record[2]) != 0 {
-			if err = u.store.Store.Set(uuid, txblob.KeyPass, record[2]); err != nil {
-				return err
-			}
+			u.store.Store.Set(uuid, txblob.KeyPass, record[2])
 		}
 		if len(record[0]) != 0 {
-			if err = u.store.Store.Set(uuid, txblob.KeyURL, record[0]); err != nil {
-				return err
-			}
+			u.store.Store.Set(uuid, txblob.KeyURL, record[0])
 		}
 		if len(record[3]) != 0 {
-			if _, err = u.store.Store.Append(uuid, txblob.KeyNotes, record[3]); err != nil {
-				return err
-			}
+			u.store.Store.Set(uuid, txblob.KeyNotes, record[3])
 		}
+
+		var labels []string
 		if len(record[5]) != 0 {
-			if _, err = u.store.Store.Append(uuid, txblob.KeyLabels, strings.ToLower(record[5])); err != nil {
-				return err
-			}
+			labels = append(labels, strings.ToLower(record[5]))
 		}
 		if record[6] == "1" {
-			if _, err = u.store.Store.Append(uuid, txblob.KeyLabels, "lpfav"); err != nil {
-				return err
-			}
+			labels = append(labels, "lpfav")
+		}
+		if len(labels) != 0 {
+			u.store.Store.Set(uuid, txblob.KeyLabels, strings.Join(labels, ","))
 		}
 	}
 
