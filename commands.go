@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -386,12 +385,21 @@ func (u *uiContext) edit(search, key string) error {
 		}
 	}()
 
+	if err = tmp.Close(); err != nil {
+		errColor.Println("failed to close file:", err)
+		return nil
+	}
+
 	// Run the editor
 	editor := os.Getenv("EDITOR")
-	if len(editor) == 0 && runtime.GOOS == "windows" {
-		editor = "notepad"
-	} else {
-		editor = "vim"
+	if len(editor) == 0 {
+		editors := []string{"code", "vim", "sublime", "textmate", "notepad"}
+		for _, ed := range editors {
+			if _, err := exec.LookPath(ed); err == nil {
+				editor = ed
+				break
+			}
+		}
 	}
 
 	cmd := exec.Command(editor, fname)
@@ -406,9 +414,9 @@ func (u *uiContext) edit(search, key string) error {
 		}
 	}
 
-	// Read the file back now that the editor's done
-	if _, err = tmp.Seek(0, os.SEEK_SET); err != nil {
-		errColor.Println("failed to seek in file:", err)
+	tmp, err = os.OpenFile(fname, os.O_RDWR, 0600)
+	if err != nil {
+		errColor.Println("failed to open tmp file to edit value:", err)
 		return nil
 	}
 
