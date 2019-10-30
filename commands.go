@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"unicode"
 
 	"github.com/aarondl/bpass/crypt"
+	"github.com/aarondl/bpass/osutil"
 	"github.com/aarondl/bpass/txblob"
 	"github.com/aarondl/bpass/txformat"
 
@@ -753,6 +755,39 @@ func showMultiline(key string, val string, width, indent int) {
 
 	fmt.Printf("%s%s\n", ind, keyColor.Sprintf("%*s", width, key+":"))
 	fmt.Println(lineInd + strings.TrimSpace(strings.Join(lines, "\n"+lineInd)))
+}
+
+func (u *uiContext) openurl(search string) error {
+	uuid, err := u.findOne(search)
+	if err != nil {
+		return nil
+	}
+	if len(uuid) == 0 {
+		return nil
+	}
+
+	blob, err := u.store.Get(uuid)
+	if err != nil {
+		return err
+	}
+
+	link := blob.Get(txblob.KeyURL)
+	if len(link) == 0 {
+		errColor.Printf("url not set on %s\n", blob.Name())
+		return nil
+	}
+
+	_, err = url.Parse(link)
+	if err != nil {
+		errColor.Printf("url was not a valid url: %v\n", err)
+		return nil
+	}
+
+	if err = osutil.OpenURL(link); err != nil {
+		errColor.Println("failed to open url:", err)
+	}
+
+	return nil
 }
 
 func (u *uiContext) dump(search string) error {
