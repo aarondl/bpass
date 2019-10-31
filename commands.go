@@ -15,9 +15,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
 	"github.com/aarondl/bpass/osutil"
-	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/txlogs"
 
 	"github.com/aarondl/color"
@@ -521,104 +521,6 @@ func (u *uiContext) deleteLabel(search string, label string) error {
 	}
 	infoColor.Println("Updated labels for", blob.Name())
 	return nil
-}
-
-func (u *uiContext) getPassword() (string, error) {
-	showSetting := func(n int) string {
-		switch {
-		case n < 0:
-			return "off"
-		case n == 0:
-			return "any"
-		}
-		return strconv.Itoa(n)
-	}
-	setSetting := func(name string, splits []string, n *int) {
-		if len(splits) == 1 {
-			if *n >= 0 {
-				*n = -1
-				fmt.Printf("%s: off\n", keyColor.Sprint(name))
-			} else {
-				*n = 0
-				fmt.Printf("%s: on\n", keyColor.Sprint(name))
-			}
-			return
-		}
-
-		i, err := strconv.Atoi(splits[1])
-		if err != nil {
-			fmt.Println("Not an integer input")
-			return
-		}
-		*n = i
-		fmt.Printf("%s: at least %d\n", keyColor.Sprint(name), i)
-	}
-
-	length := 32
-	upper, lower, number, basic, extra := 0, 0, 0, 0, 0
-
-	help := func() {
-		infoColor.Println("Enter a number to adjust length, a letter to toggle/use a feature\nor a letter followed by a number to ensure at least n of that type")
-		infoColor.Printf("  length: %-3d [u]pper: %-3s [l]ower: %-3s\n", length, showSetting(upper), showSetting(lower))
-		infoColor.Printf("[n]umber: %-3s [b]asic: %-3s [e]xtra: %-3s\n", showSetting(number), showSetting(basic), showSetting(extra))
-		infoColor.Println("[y] accept password, [m] manual password entry, [enter] to regen password, [?] help")
-		fmt.Println()
-	}
-	help()
-
-	var err error
-	var choice, password string
-	for {
-		if choice != "?" {
-			password, err = genPassword(length, upper, lower, number, basic, extra)
-			if err == errPasswordImpossible {
-				errColor.Println("Could not generate password with these requirements")
-			} else if err != nil {
-				return "", err
-			}
-		}
-
-		if err == nil {
-			fmt.Println(promptColor.Sprint("password:"), passColor.Sprint(password))
-		}
-
-		choice, err = u.prompt(promptColor.Sprint("u/l/n/b/e/y/m/enter/?> "))
-		if err != nil {
-			return "", err
-		}
-
-		splits := strings.Fields(choice)
-
-		switch {
-		case choice == "":
-			// Regen
-		case choice == "y":
-			return password, nil
-		case choice == "m":
-			b, err := u.in.LineHidden(promptColor.Sprint("enter new password: "))
-			return string(b), err
-		case choice == "?":
-			help()
-		case splits[0] == "u":
-			setSetting("uppercase", splits, &upper)
-		case splits[0] == "l":
-			setSetting("lowercase", splits, &lower)
-		case splits[0] == "n":
-			setSetting("numbers", splits, &number)
-		case splits[0] == "b":
-			setSetting("basic symbols", splits, &basic)
-		case splits[0] == "e":
-			setSetting("extra symbols", splits, &extra)
-		default:
-			newLen, err := strconv.Atoi(choice)
-			if err != nil {
-				fmt.Println("New length was not an integer")
-				continue
-			}
-			fmt.Printf("%s: %d\n", keyColor.Sprint("length"), newLen)
-			length = newLen
-		}
-	}
 }
 
 func (u *uiContext) show(search string, snapshot int) error {
