@@ -1,4 +1,4 @@
-package txformat
+package txlogs
 
 import "fmt"
 

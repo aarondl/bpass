@@ -1,4 +1,4 @@
-package txblob
+package blobformat
 
 import (
 	"fmt"
@@ -6,14 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aarondl/bpass/txformat"
+	"github.com/aarondl/bpass/txlogs"
 
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 )
 
 // Blob is a context of a single blob
-type Blob txformat.Entry
+type Blob txlogs.Entry
 
 // Keys returns all the keys known about
 func (b Blob) Keys() (keys []string) {
@@ -93,7 +93,7 @@ func (b Blob) Updated() (time.Time, error) {
 }
 
 func (b Blob) getTimestamp(key string) (time.Time, error) {
-	timestamp, ok := txformat.Entry(b)[key]
+	timestamp, ok := txlogs.Entry(b)[key]
 	if !ok {
 		return time.Time{}, nil
 	}

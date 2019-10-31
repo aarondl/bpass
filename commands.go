@@ -17,8 +17,8 @@ import (
 
 	"github.com/aarondl/bpass/crypt"
 	"github.com/aarondl/bpass/osutil"
-	"github.com/aarondl/bpass/txblob"
-	"github.com/aarondl/bpass/txformat"
+	"github.com/aarondl/bpass/blobformat"
+	"github.com/aarondl/bpass/txlogs"
 
 	"github.com/aarondl/color"
 	"github.com/atotto/clipboard"
@@ -76,7 +76,7 @@ func (u *uiContext) addNew(name string) (err error) {
 	return u.store.Do(func() error {
 		uuid, err := u.store.New(name)
 		if err != nil {
-			if err == txblob.ErrNameNotUnique {
+			if err == blobformat.ErrNameNotUnique {
 				errColor.Printf("%q already exists\n", name)
 				return nil
 			}
@@ -101,13 +101,13 @@ func (u *uiContext) addNew(name string) (err error) {
 		// Use raw sets here to avoid creating history spam based on timestamp
 		// additions
 		if len(user) != 0 {
-			u.store.Store.Set(uuid, txblob.KeyUser, user)
+			u.store.DB.Set(uuid, blobformat.KeyUser, user)
 		}
 		if len(email) != 0 {
-			u.store.Store.Set(uuid, txblob.KeyEmail, email)
+			u.store.DB.Set(uuid, blobformat.KeyEmail, email)
 		}
 		if len(pass) != 0 {
-			u.store.Store.Set(uuid, txblob.KeyPass, pass)
+			u.store.DB.Set(uuid, blobformat.KeyPass, pass)
 		}
 
 		return nil
@@ -124,7 +124,7 @@ func (u *uiContext) rename(src, dst string) error {
 		return nil
 	}
 
-	if err := u.store.Rename(oldUUID, dst); err == txblob.ErrNameNotUnique {
+	if err := u.store.Rename(oldUUID, dst); err == blobformat.ErrNameNotUnique {
 		errColor.Println(dst, "already exists")
 		return nil
 	} else if err != nil {
@@ -182,7 +182,7 @@ func (u *uiContext) deleteKey(search, key string) error {
 	_, ok := blob[key]
 	if ok {
 		err := u.store.DeleteKey(uuid, key)
-		if txblob.IsKeyNotAllowed(err) {
+		if blobformat.IsKeyNotAllowed(err) {
 			errColor.Println(key, "may not be deleted")
 			return nil
 		}
@@ -238,7 +238,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 	}
 
 	switch key {
-	case txblob.KeyTwoFactor:
+	case blobformat.KeyTwoFactor:
 		val, err := blob.TwoFactor()
 		if err != nil {
 			errColor.Println(err)
@@ -254,7 +254,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		} else {
 			fmt.Println(val)
 		}
-	case txblob.KeyUpdated:
+	case blobformat.KeyUpdated:
 		value, err := blob.Updated()
 		if err != nil {
 			return err
@@ -266,7 +266,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 			fmt.Println(val)
 		}
 	default:
-		entry := txformat.Entry(blob)
+		entry := txlogs.Entry(blob)
 
 		value, ok := entry[key]
 		if !ok {
@@ -292,7 +292,7 @@ func (u *uiContext) set(search, key, value string) error {
 		return nil
 	}
 
-	if key == txblob.KeyPass && len(value) == 0 {
+	if key == blobformat.KeyPass && len(value) == 0 {
 		value, err = u.getPassword()
 		if err != nil {
 			return err
@@ -307,7 +307,7 @@ func (u *uiContext) set(search, key, value string) error {
 	}
 
 	switch key {
-	case txblob.KeyTwoFactor:
+	case blobformat.KeyTwoFactor:
 		if err := u.store.SetTwofactor(uuid, value); err != nil {
 			errColor.Println(err)
 			return nil
@@ -447,7 +447,7 @@ func (u *uiContext) addLabels(search string) error {
 		return err
 	}
 
-	labelVal := blob[txblob.KeyLabels]
+	labelVal := blob[blobformat.KeyLabels]
 	var labels []string
 	if len(labelVal) != 0 {
 		labels = strings.Split(labelVal, ",")
@@ -476,7 +476,7 @@ func (u *uiContext) addLabels(search string) error {
 	}
 
 	if changed {
-		u.store.Set(uuid, txblob.KeyLabels, strings.Join(labels, ","))
+		u.store.Set(uuid, blobformat.KeyLabels, strings.Join(labels, ","))
 		infoColor.Println("Updated labels for", blob.Name())
 	}
 	return nil
@@ -496,7 +496,7 @@ func (u *uiContext) deleteLabel(search string, label string) error {
 		return err
 	}
 
-	labelVal := blob[txblob.KeyLabels]
+	labelVal := blob[blobformat.KeyLabels]
 	if len(labelVal) == 0 {
 		errColor.Println("Could not find that label")
 		return nil
@@ -648,7 +648,7 @@ func (u *uiContext) show(search string, snapshot int) error {
 			return nil
 		}
 
-		blob = txblob.Blob(entry)
+		blob = blobformat.Blob(entry)
 	}
 
 	// Figure out the max width of the key names
@@ -664,13 +664,13 @@ func (u *uiContext) show(search string, snapshot int) error {
 
 	// Do these first
 	ordering := []string{
-		txblob.KeyName,
-		txblob.KeyUser,
-		txblob.KeyEmail,
-		txblob.KeyPass,
-		txblob.KeyTwoFactor,
-		txblob.KeyLabels,
-		txblob.KeyNotes,
+		blobformat.KeyName,
+		blobformat.KeyUser,
+		blobformat.KeyEmail,
+		blobformat.KeyPass,
+		blobformat.KeyTwoFactor,
+		blobformat.KeyLabels,
+		blobformat.KeyNotes,
 	}
 
 	// Delete the ordering ones out of keys
@@ -687,28 +687,28 @@ func (u *uiContext) show(search string, snapshot int) error {
 	keys = append(ordering, keys...)
 
 	for _, k := range keys {
-		if k == txblob.KeyUpdated {
+		if k == blobformat.KeyUpdated {
 			// Special case, this one shows up at the end
 			continue
 		}
 
-		entry := txformat.Entry(blob)
+		entry := txlogs.Entry(blob)
 		val, ok := entry[k]
 		if !ok {
 			continue
 		}
 
 		switch k {
-		case txblob.KeyPass:
-			showHidden(u, txblob.KeyPass, blob.Get(txblob.KeyPass), width, indent)
-		case txblob.KeyLabels:
+		case blobformat.KeyPass:
+			showHidden(u, blobformat.KeyPass, blob.Get(blobformat.KeyPass), width, indent)
+		case blobformat.KeyLabels:
 			showKeyValue(u, k, strings.ReplaceAll(val, ",", ", "), width, indent)
-		case txblob.KeyTwoFactor:
+		case blobformat.KeyTwoFactor:
 			t, err := blob.TwoFactor()
 			if err != nil {
 				fmt.Println("Error retrieving two factor:", err)
 			} else if len(t) != 0 {
-				showKeyValue(u, txblob.KeyTwoFactor, t, width, indent)
+				showKeyValue(u, blobformat.KeyTwoFactor, t, width, indent)
 			}
 		default:
 			if strings.ContainsRune(val, '\n') {
@@ -770,7 +770,7 @@ func (u *uiContext) openurl(search string) error {
 		return err
 	}
 
-	link := blob.Get(txblob.KeyURL)
+	link := blob.Get(blobformat.KeyURL)
 	if len(link) == 0 {
 		errColor.Printf("url not set on %s\n", blob.Name())
 		return nil
@@ -808,7 +808,7 @@ func (u *uiContext) dump(search string) error {
 }
 
 func (u *uiContext) dumpall() error {
-	b, err := json.MarshalIndent(u.store.Store, "", "  ")
+	b, err := json.MarshalIndent(u.store.DB, "", "  ")
 	if err != nil {
 		return err
 	}

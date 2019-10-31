@@ -1,4 +1,4 @@
-package txblob
+package blobformat
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/aarondl/bpass/fuzzy"
-	"github.com/aarondl/bpass/txformat"
+	"github.com/aarondl/bpass/txlogs"
 
 	"github.com/pquerna/otp"
 )
@@ -37,7 +37,7 @@ func IsKeyNotAllowed(err error) bool {
 // All manipulation should be done via this interface or special keys like
 // updated and snapshots will probably be mishandled.
 type Blobs struct {
-	*txformat.Store
+	*txlogs.DB
 }
 
 // SearchResults have helpers to get uuids/names easily
@@ -90,7 +90,7 @@ func (b Blobs) Search(search string) (entries SearchResults, err error) {
 		return nil, err
 	}
 
-	if len(b.Store.Snapshot) == 0 {
+	if len(b.DB.Snapshot) == 0 {
 		return nil, nil
 	}
 	if len(search) == 0 {
@@ -102,7 +102,7 @@ func (b Blobs) Search(search string) (entries SearchResults, err error) {
 	nFrags := len(fragments)
 
 AllKeys:
-	for uuid, entry := range b.Store.Snapshot {
+	for uuid, entry := range b.DB.Snapshot {
 		blob := Blob(entry)
 		name := blob.Name()
 
@@ -135,7 +135,7 @@ func (b Blobs) SearchLabels(labels ...string) (entries SearchResults, err error)
 		return nil, err
 	}
 
-	if len(b.Store.Snapshot) == 0 {
+	if len(b.DB.Snapshot) == 0 {
 		return nil, nil
 	}
 	if len(labels) == 0 {
@@ -143,7 +143,7 @@ func (b Blobs) SearchLabels(labels ...string) (entries SearchResults, err error)
 	}
 
 	entries = make(map[string]string)
-	for uuid, entry := range b.Store.Snapshot {
+	for uuid, entry := range b.DB.Snapshot {
 		blob := Blob(entry)
 
 		lblVal := blob[KeyLabels]
@@ -183,7 +183,7 @@ func (b Blobs) Find(name string) (string, Blob, error) {
 		return "", nil, err
 	}
 
-	for uuid, entry := range b.Store.Snapshot {
+	for uuid, entry := range b.DB.Snapshot {
 		blob := Blob(entry)
 		if blob.Name() == name {
 			return uuid, blob, nil
@@ -202,7 +202,7 @@ func (b Blobs) FindByUUID(uuid string) (Blob, error) {
 		return nil, err
 	}
 
-	blob, ok := b.Store.Snapshot[uuid]
+	blob, ok := b.DB.Snapshot[uuid]
 	if !ok {
 		return nil, nil
 	}
@@ -210,12 +210,12 @@ func (b Blobs) FindByUUID(uuid string) (Blob, error) {
 }
 
 func (b Blobs) allEntries() (entries SearchResults) {
-	if len(b.Store.Snapshot) == 0 {
+	if len(b.DB.Snapshot) == 0 {
 		return nil
 	}
 
 	entries = make(map[string]string)
-	for uuid, entry := range b.Store.Snapshot {
+	for uuid, entry := range b.DB.Snapshot {
 		blob := Blob(entry)
 		entries[uuid] = blob.Name()
 	}
@@ -254,7 +254,7 @@ func (b Blobs) Get(uuid string) (Blob, error) {
 		return nil, err
 	}
 
-	obj, ok := b.Store.Snapshot[uuid]
+	obj, ok := b.DB.Snapshot[uuid]
 	if !ok {
 		panic(uuid + " entry not found")
 	}
@@ -270,19 +270,19 @@ func (b Blobs) New(name string) (uuid string, err error) {
 		return "", err
 	}
 
-	for _, entry := range b.Store.Snapshot {
+	for _, entry := range b.DB.Snapshot {
 		blob := Blob(entry)
 		if name == blob.Name() {
 			return "", ErrNameNotUnique
 		}
 	}
 
-	uuid, err = b.Store.Add()
+	uuid, err = b.DB.Add()
 	if err != nil {
 		return "", err
 	}
 	b.touchUpdated(uuid)
-	b.Store.Set(uuid, KeyName, name)
+	b.DB.Set(uuid, KeyName, name)
 
 	return uuid, nil
 }
@@ -294,20 +294,20 @@ func (b Blobs) Rename(uuid, newName string) error {
 		return err
 	}
 
-	for _, entry := range b.Store.Snapshot {
+	for _, entry := range b.DB.Snapshot {
 		blob := Blob(entry)
 		if blob.Name() == newName {
 			return ErrNameNotUnique
 		}
 	}
 
-	_, ok := b.Store.Snapshot[uuid]
+	_, ok := b.DB.Snapshot[uuid]
 	if !ok {
 		return errors.New("uuid not found")
 	}
 
 	b.touchUpdated(uuid)
-	b.Store.Set(uuid, KeyName, newName)
+	b.DB.Set(uuid, KeyName, newName)
 	return nil
 }
 
@@ -323,7 +323,7 @@ func (b Blobs) Set(uuid, key, value string) error {
 	}
 
 	b.touchUpdated(uuid)
-	b.Store.Set(uuid, key, value)
+	b.DB.Set(uuid, key, value)
 	return nil
 }
 
@@ -335,7 +335,7 @@ func (b Blobs) DeleteKey(uuid, key string) error {
 	}
 
 	b.touchUpdated(uuid)
-	b.Store.DeleteKey(uuid, key)
+	b.DB.DeleteKey(uuid, key)
 	return nil
 }
 
@@ -367,7 +367,7 @@ func (b Blobs) SetTwofactor(uuid, uriOrKey string) error {
 	}
 
 	b.touchUpdated(uuid)
-	b.Store.Set(uuid, KeyTwoFactor, uri)
+	b.DB.Set(uuid, KeyTwoFactor, uri)
 	return nil
 }
 
@@ -404,7 +404,7 @@ func (b Blobs) RemoveLabel(uuid string, index int) (err error) {
 	}
 
 	if len(labels) == 1 {
-		b.Store.DeleteKey(uuid, KeyLabels)
+		b.DB.DeleteKey(uuid, KeyLabels)
 		return nil
 	}
 
@@ -412,7 +412,7 @@ func (b Blobs) RemoveLabel(uuid string, index int) (err error) {
 	labels = labels[len(labels)-1:]
 
 	b.touchUpdated(uuid)
-	b.Store.Set(uuid, KeyLabels, strings.Join(labels, ","))
+	b.DB.Set(uuid, KeyLabels, strings.Join(labels, ","))
 	return nil
 }
 
@@ -440,5 +440,5 @@ func (b Blobs) NewSync(kind string) (uuid string, err error) {
 
 // touchUpdated refreshes the updated timestamp for the given item
 func (b Blobs) touchUpdated(uuid string) {
-	b.Store.Set(uuid, KeyUpdated, strconv.FormatInt(time.Now().UnixNano(), 10))
+	b.DB.Set(uuid, KeyUpdated, strconv.FormatInt(time.Now().UnixNano(), 10))
 }

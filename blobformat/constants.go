@@ -1,5 +1,5 @@
-// Package txblob wraps txformat with password managery domain stuff
-package txblob
+// Package blobformat wraps txlogs with password managery domain stuff
+package blobformat
 
 // Keys for the map
 const (

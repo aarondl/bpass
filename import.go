@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/aarondl/bpass/txblob"
+	"github.com/aarondl/bpass/blobformat"
 )
 
 func importLastpass(u *uiContext) error {
@@ -66,7 +66,7 @@ func importLastpass(u *uiContext) error {
 		for {
 			uuid, err = u.store.New(newName)
 			if err != nil {
-				if err == txblob.ErrNameNotUnique {
+				if err == blobformat.ErrNameNotUnique {
 					newName += "1"
 					continue
 				}
@@ -83,16 +83,16 @@ func importLastpass(u *uiContext) error {
 		}
 
 		if len(record[1]) != 0 {
-			u.store.Store.Set(uuid, txblob.KeyUser, record[1])
+			u.store.DB.Set(uuid, blobformat.KeyUser, record[1])
 		}
 		if len(record[2]) != 0 {
-			u.store.Store.Set(uuid, txblob.KeyPass, record[2])
+			u.store.DB.Set(uuid, blobformat.KeyPass, record[2])
 		}
 		if len(record[0]) != 0 {
-			u.store.Store.Set(uuid, txblob.KeyURL, record[0])
+			u.store.DB.Set(uuid, blobformat.KeyURL, record[0])
 		}
 		if len(record[3]) != 0 {
-			u.store.Store.Set(uuid, txblob.KeyNotes, record[3])
+			u.store.DB.Set(uuid, blobformat.KeyNotes, record[3])
 		}
 
 		var labels []string
@@ -103,7 +103,7 @@ func importLastpass(u *uiContext) error {
 			labels = append(labels, "lpfav")
 		}
 		if len(labels) != 0 {
-			u.store.Store.Set(uuid, txblob.KeyLabels, strings.Join(labels, ","))
+			u.store.DB.Set(uuid, blobformat.KeyLabels, strings.Join(labels, ","))
 		}
 	}
 

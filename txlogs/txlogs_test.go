@@ -1,4 +1,4 @@
-package txformat
+package txlogs
 
 import (
 	"errors"
@@ -13,7 +13,7 @@ import (
 func TestBasic(t *testing.T) {
 	t.Parallel()
 
-	store := new(Store)
+	store := new(DB)
 	uuid, err := store.Add()
 	must(t, err)
 
@@ -55,7 +55,7 @@ func TestBasic(t *testing.T) {
 func TestHistory(t *testing.T) {
 	t.Parallel()
 
-	store := new(Store)
+	store := new(DB)
 	uuid, err := store.Add()
 	must(t, err)
 	uuid2, err := store.Add()
@@ -159,7 +159,7 @@ func TestHistory(t *testing.T) {
 func TestMarshal(t *testing.T) {
 	t.Parallel()
 
-	store := new(Store)
+	store := new(DB)
 	uuid, err := store.Add()
 	must(t, err)
 	store.Set(uuid, "test1", "value")
@@ -402,7 +402,7 @@ func TestMerge(t *testing.T) {
 func TestTransactions(t *testing.T) {
 	t.Parallel()
 
-	store := new(Store)
+	store := new(DB)
 	store.Begin()
 
 	uuid, err := store.Add()
@@ -441,7 +441,7 @@ func TestTransactions(t *testing.T) {
 func TestTransactionsDo(t *testing.T) {
 	t.Parallel()
 
-	store := new(Store)
+	store := new(DB)
 
 	err := store.Do(func() error {
 		uuid, err := store.Add()
@@ -486,7 +486,7 @@ func TestTransactionsDo(t *testing.T) {
 func TestRollbackN(t *testing.T) {
 	t.Parallel()
 
-	store := new(Store)
+	store := new(DB)
 	uuid, err := store.Add()
 	must(t, err)
 	store.Set(uuid, "test1", "value")
@@ -529,7 +529,7 @@ func TestRollbackN(t *testing.T) {
 func TestNVersions(t *testing.T) {
 	t.Parallel()
 
-	store := new(Store)
+	store := new(DB)
 
 	if store.NVersions("") != 0 {
 		t.Error("it should have no versions")
@@ -559,7 +559,7 @@ func TestNVersions(t *testing.T) {
 func TestLastUpdated(t *testing.T) {
 	t.Parallel()
 
-	store := new(Store)
+	store := new(DB)
 
 	if store.LastUpdated("") != -1 {
 		t.Error("it should not have been found")
@@ -573,8 +573,8 @@ func TestLastUpdated(t *testing.T) {
 	}
 }
 
-func randomStore() *Store {
-	s := new(Store)
+func randomStore() *DB {
+	s := new(DB)
 
 	items := make([]string, 20)
 	for i := range items {

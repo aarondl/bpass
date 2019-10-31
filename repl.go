@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aarondl/bpass/txblob"
+	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/color"
 )
 
@@ -202,7 +202,7 @@ func (r *repl) run() error {
 
 			err = r.ctx.get(name, key, index, cmd == "cp")
 
-		case "totp", txblob.KeyUser, txblob.KeyPass, txblob.KeyEmail:
+		case "totp", blobformat.KeyUser, blobformat.KeyPass, blobformat.KeyEmail:
 			name := r.ctxEntry
 			if len(splits) < 1 && len(name) == 0 {
 				errColor.Printf("syntax: %s <query>\n", cmd)

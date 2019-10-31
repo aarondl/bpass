@@ -1,4 +1,4 @@
-package txformat
+package txlogs
 
 // TxKind enum type
 type TxKind string

@@ -1,6 +1,5 @@
-// Package txformat works on a json-encoded blob. For an example on the on-disk
-// data structure see the Store documentation.
-package txformat
+// Package txlogs manages a key-value database built with a transactional log.
+package txlogs
 
 import (
 	"encoding/json"
@@ -11,7 +10,7 @@ import (
 	uuidpkg "github.com/gofrs/uuid"
 )
 
-// Store contains a transaction log, and a snapshot at a particular version.
+// DB contains a transaction log, and a snapshot at a particular version.
 // The transaction logs are made up of Txs. You can see all the kinds possible
 // on the documentation for Tx.
 //
@@ -32,7 +31,7 @@ import (
 //       { "time": 1571887979, "kind": "delkey", "uuid": "d6f...", "key": "test2" }
 //     ]
 //   }
-type Store struct {
+type DB struct {
 	// Version of the snapshot
 	Version uint `msgpack:"version,omitempty" json:"version,omitempty"`
 	// Snapshot of the data at a specific version
@@ -43,7 +42,7 @@ type Store struct {
 	txPoint int
 }
 
-// Entry is an cached entry in the store, it holds the values as currently
+// Entry is a cached entry in the store, it holds the values as currently
 // known.
 type Entry map[string]string
 
@@ -51,9 +50,9 @@ type storeNoSnapshot struct {
 	Log []Tx `msgpack:"log,omitempty" json:"log,omitempty"`
 }
 
-// New takes a json blob and unmarshals it into a Store
-func New(data []byte) (*Store, error) {
-	s := new(Store)
+// New takes a json blob and unmarshals it into a DB
+func New(data []byte) (*DB, error) {
+	s := new(DB)
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, err
 	}
@@ -72,7 +71,7 @@ func NewLog(data []byte) ([]Tx, error) {
 }
 
 // Save marshals as json blob
-func (s *Store) Save() ([]byte, error) {
+func (s *DB) Save() ([]byte, error) {
 	if s.txPoint != 0 {
 		return nil, errors.New("refusing to save while transaction active")
 	}
@@ -81,7 +80,7 @@ func (s *Store) Save() ([]byte, error) {
 }
 
 // Add a new entry
-func (s *Store) Add() (uuid string, err error) {
+func (s *DB) Add() (uuid string, err error) {
 	uuidObj, err := uuidpkg.NewV4()
 	if err != nil {
 		return "", err
@@ -100,7 +99,7 @@ func (s *Store) Add() (uuid string, err error) {
 }
 
 // Set k=v for a uuid
-func (s *Store) Set(uuid, key, value string) {
+func (s *DB) Set(uuid, key, value string) {
 	s.appendLog(
 		Tx{
 			Kind:  TxSetKey,
@@ -112,7 +111,7 @@ func (s *Store) Set(uuid, key, value string) {
 }
 
 // Delete an entry
-func (s *Store) Delete(uuid string) {
+func (s *DB) Delete(uuid string) {
 	s.appendLog(
 		Tx{
 			Kind: TxDelete,
@@ -122,7 +121,7 @@ func (s *Store) Delete(uuid string) {
 }
 
 // DeleteKey deletes a key from an entry
-func (s *Store) DeleteKey(uuid, key string) {
+func (s *DB) DeleteKey(uuid, key string) {
 	s.appendLog(
 		Tx{
 			Kind: TxDeleteKey,
@@ -133,7 +132,7 @@ func (s *Store) DeleteKey(uuid, key string) {
 }
 
 // appendLog creates a new UUID for tx.ID and appends the log
-func (s *Store) appendLog(tx Tx) {
+func (s *DB) appendLog(tx Tx) {
 	tx.Time = time.Now().UnixNano()
 	s.Log = append(s.Log, tx)
 }
@@ -143,12 +142,12 @@ func (s *Store) appendLog(tx Tx) {
 //
 // We add 1 to the length to keep the 0 valid as a "no transaction started"
 // sentinel value.
-func (s *Store) Begin() {
+func (s *DB) Begin() {
 	s.txPoint = len(s.Log) + 1
 }
 
 // Commit the transactions to the log
-func (s *Store) Commit() {
+func (s *DB) Commit() {
 	if s.txPoint == 0 {
 		panic("commit called before begin")
 	}
@@ -156,7 +155,7 @@ func (s *Store) Commit() {
 }
 
 // Rollback to the last begin point, invalidates the snapshot if necessary
-func (s *Store) Rollback() {
+func (s *DB) Rollback() {
 	if s.txPoint == 0 {
 		panic("rollback called before begin")
 	}
@@ -171,7 +170,7 @@ func (s *Store) Rollback() {
 
 // Do a transaction, if an error is returned by the lambda then
 // the transaction is rolled back.
-func (s *Store) Do(fn func() error) error {
+func (s *DB) Do(fn func() error) error {
 	s.Begin()
 	err := fn()
 	if err != nil {
@@ -184,7 +183,7 @@ func (s *Store) Do(fn func() error) error {
 
 // RollbackN undoes the last N transactions and invalidates the snapshot
 // if necessary.
-func (s *Store) RollbackN(n uint) error {
+func (s *DB) RollbackN(n uint) error {
 	if n == 0 {
 		return nil
 	}
@@ -204,14 +203,14 @@ func (s *Store) RollbackN(n uint) error {
 }
 
 // ResetSnapshot clears the current snapshot out of memory
-func (s *Store) ResetSnapshot() {
+func (s *DB) ResetSnapshot() {
 	s.Version = 0
 	s.Snapshot = nil
 }
 
 // UpdateSnapshot applies all outstanding transactions in the log to the
 // snapshot.
-func (s *Store) UpdateSnapshot() error {
+func (s *DB) UpdateSnapshot() error {
 	if s.Version >= uint(len(s.Log)) {
 		return nil
 	}
@@ -231,7 +230,7 @@ func (s *Store) UpdateSnapshot() error {
 
 // SnapshotAt creates a new snapshot of a particular entry versionsAgo
 // in the past.
-func (s *Store) SnapshotAt(versionsAgo int) (map[string]Entry, error) {
+func (s *DB) SnapshotAt(versionsAgo int) (map[string]Entry, error) {
 	if versionsAgo > len(s.Log) {
 		return nil, errors.New("there are not that many versions")
 	}
@@ -250,7 +249,7 @@ func (s *Store) SnapshotAt(versionsAgo int) (map[string]Entry, error) {
 // EntrySnapshotAt creates a new snapshot of a particular entry versionsAgo
 // in the past. If history past the existence of the entry is requested
 // a KeyNotFound error may be present.
-func (s *Store) EntrySnapshotAt(uuid string, versionsAgo int) (Entry, error) {
+func (s *DB) EntrySnapshotAt(uuid string, versionsAgo int) (Entry, error) {
 	if versionsAgo >= len(s.Log) {
 		return nil, errors.New("there are not that many versions")
 	}
@@ -285,7 +284,7 @@ func (s *Store) EntrySnapshotAt(uuid string, versionsAgo int) (Entry, error) {
 }
 
 // NVersions returns the number of versions we have recorded about an item
-func (s *Store) NVersions(uuid string) (versions int) {
+func (s *DB) NVersions(uuid string) (versions int) {
 	for _, l := range s.Log {
 		if l.UUID == uuid {
 			versions++
@@ -297,7 +296,7 @@ func (s *Store) NVersions(uuid string) (versions int) {
 
 // LastUpdated returns the unix nanosecond timestamp for when the entry was
 // updated last. Will be -1 if the entry is not found.
-func (s *Store) LastUpdated(uuid string) (last int64) {
+func (s *DB) LastUpdated(uuid string) (last int64) {
 	last = -1
 
 	for i := len(s.Log) - 1; i >= 0; i-- {

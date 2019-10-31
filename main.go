@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/aarondl/bpass/crypt"
-	"github.com/aarondl/bpass/txblob"
-	"github.com/aarondl/bpass/txformat"
+	"github.com/aarondl/bpass/blobformat"
+	"github.com/aarondl/bpass/txlogs"
 
 	"github.com/aarondl/color"
 	"github.com/atotto/clipboard"
@@ -29,7 +29,7 @@ type uiContext struct {
 	shortFilename string
 
 	// Decrypted and decoded storage
-	store txblob.Blobs
+	store blobformat.Blobs
 	// save key + salt for encrypting later
 	// save password for decrypting sync'd copies
 	pass string
@@ -180,17 +180,17 @@ func (u *uiContext) loadBlob() error {
 		u.key = meta.Key
 		u.salt = meta.Salt
 
-		store, err := txformat.New(pt)
+		store, err := txlogs.New(pt)
 		if err != nil {
 			return err
 		}
 
-		u.store = txblob.Blobs{Store: store}
+		u.store = blobformat.Blobs{DB: store}
 	}
 
 	// It's possible the store was empty/null even on a load, just create it
-	if u.store.Store == nil {
-		u.store = txblob.Blobs{Store: new(txformat.Store)}
+	if u.store.DB == nil {
+		u.store = blobformat.Blobs{DB: new(txlogs.DB)}
 	}
 
 	return nil

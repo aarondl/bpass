@@ -20,8 +20,8 @@ import (
 
 	"github.com/aarondl/bpass/crypt"
 	"github.com/aarondl/bpass/scpsync"
-	"github.com/aarondl/bpass/txblob"
-	"github.com/aarondl/bpass/txformat"
+	"github.com/aarondl/bpass/blobformat"
+	"github.com/aarondl/bpass/txlogs"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -51,10 +51,10 @@ func (u *uiContext) sync(auto, push bool) error {
 	// From this point on we don't worry about key's not being present for
 	// the most part since collectSyncs should only return valid things
 	hosts := make(map[string]string)
-	logs := make([][]txformat.Tx, 0, len(syncs))
+	logs := make([][]txlogs.Tx, 0, len(syncs))
 	for _, uuid := range syncs {
 		entry := u.store.Snapshot[uuid]
-		name, _ := entry[txblob.KeyName]
+		name, _ := entry[blobformat.KeyName]
 
 		infoColor.Println("pull:", name)
 
@@ -78,7 +78,7 @@ func (u *uiContext) sync(auto, push bool) error {
 			continue
 		}
 
-		log, err := txformat.NewLog(pt)
+		log, err := txlogs.NewLog(pt)
 		if err != nil {
 			errColor.Println("failed parsing log %q: %v\n", name, err)
 			continue
@@ -101,7 +101,7 @@ func (u *uiContext) sync(auto, push bool) error {
 		os.Exit(1)
 	}
 
-	if err = saveHosts(u.store.Store, hosts); err != nil {
+	if err = saveHosts(u.store.DB, hosts); err != nil {
 		return err
 	}
 
@@ -122,7 +122,7 @@ func (u *uiContext) sync(auto, push bool) error {
 	hosts = make(map[string]string)
 	for _, uuid := range syncs {
 		entry := u.store.Snapshot[uuid]
-		name, _ := entry[txblob.KeyName]
+		name, _ := entry[blobformat.KeyName]
 
 		infoColor.Println("push:", name)
 
@@ -136,25 +136,25 @@ func (u *uiContext) sync(auto, push bool) error {
 		}
 	}
 
-	if err = saveHosts(u.store.Store, hosts); err != nil {
+	if err = saveHosts(u.store.DB, hosts); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func saveHosts(store *txformat.Store, newHosts map[string]string) error {
+func saveHosts(store *txlogs.DB, newHosts map[string]string) error {
 	for uuid, hostentry := range newHosts {
 		entry := store.Snapshot[uuid]
-		hosts := entry[txblob.KeyKnownHosts]
+		hosts := entry[blobformat.KeyKnownHosts]
 		if len(hosts) == 0 {
-			store.Set(uuid, txblob.KeyKnownHosts, hostentry)
+			store.Set(uuid, blobformat.KeyKnownHosts, hostentry)
 			continue
 		}
 
 		hostLines := strings.Split(hosts, "\n")
 		hostLines = append(hostLines, hostentry)
-		store.Set(uuid, txblob.KeyKnownHosts, strings.Join(hostLines, "\n"))
+		store.Set(uuid, blobformat.KeyKnownHosts, strings.Join(hostLines, "\n"))
 	}
 
 	return store.UpdateSnapshot()
@@ -167,20 +167,20 @@ func (u *uiContext) collectSyncs() ([]string, error) {
 	var validSyncs []string
 
 	for uuid, entry := range u.store.Snapshot {
-		sync, _ := entry[txblob.KeySync]
+		sync, _ := entry[blobformat.KeySync]
 		if sync != "true" {
 			continue
 		}
 
-		name := entry[txblob.KeyName]
+		name := entry[blobformat.KeyName]
 		if len(name) == 0 {
 			errColor.Printf("%q is a sync entry but its name is broken (skipping)", uuid)
 			continue
 		}
 
-		uri := entry[txblob.KeyURL]
+		uri := entry[blobformat.KeyURL]
 		if len(uri) == 0 {
-			errColor.Printf("%q is a sync entry but it has no %q key (skipping)\n", name, txblob.KeyURL)
+			errColor.Printf("%q is a sync entry but it has no %q key (skipping)\n", name, blobformat.KeyURL)
 			continue
 		}
 
@@ -205,7 +205,7 @@ func (u *uiContext) collectSyncs() ([]string, error) {
 func pullBlob(u *uiContext, uuid string) (ct []byte, hostentry string, err error) {
 	entry := u.store.Snapshot[uuid]
 	// We know this parses because we parsed it once before
-	uri, _ := url.Parse(entry[txblob.KeyURL])
+	uri, _ := url.Parse(entry[blobformat.KeyURL])
 
 	switch uri.Scheme {
 	case syncSCP:
@@ -225,7 +225,7 @@ func pullBlob(u *uiContext, uuid string) (ct []byte, hostentry string, err error
 // pushBlob uploads a file to a given sync entry
 func pushBlob(u *uiContext, uuid string, payload []byte) (hostentry string, err error) {
 	entry := u.store.Snapshot[uuid]
-	uri, _ := url.Parse(entry[txblob.KeyURL])
+	uri, _ := url.Parse(entry[blobformat.KeyURL])
 
 	switch uri.Scheme {
 	case syncSCP:
@@ -256,15 +256,15 @@ func decryptBlob(u *uiContext, name string, ct []byte) (pt []byte, err error) {
 	}
 }
 
-func mergeLogs(u *uiContext, in []txformat.Tx, toMerge [][]txformat.Tx) ([]txformat.Tx, error) {
+func mergeLogs(u *uiContext, in []txlogs.Tx, toMerge [][]txlogs.Tx) ([]txlogs.Tx, error) {
 	if len(toMerge) == 0 {
 		return in, nil
 	}
 
-	var c []txformat.Tx
-	var conflicts []txformat.Conflict
+	var c []txlogs.Tx
+	var conflicts []txlogs.Conflict
 	for _, log := range toMerge {
-		c, conflicts = txformat.Merge(in, log, conflicts)
+		c, conflicts = txlogs.Merge(in, log, conflicts)
 
 		if len(conflicts) == 0 {
 			break
@@ -280,12 +280,12 @@ func mergeLogs(u *uiContext, in []txformat.Tx, toMerge [][]txformat.Tx) ([]txfor
 			)
 
 			switch c.SetTx.Kind {
-			case txformat.TxSetKey:
+			case txlogs.TxSetKey:
 				infoColor.Printf("a kv set happened:\n%s = %s\n",
 					c.SetTx.Key,
 					c.SetTx.Value,
 				)
-			case txformat.TxDeleteKey:
+			case txlogs.TxDeleteKey:
 				infoColor.Printf("a key delete happened for key:\n%s\n",
 					c.SetTx.Key,
 				)
@@ -312,13 +312,13 @@ func mergeLogs(u *uiContext, in []txformat.Tx, toMerge [][]txformat.Tx) ([]txfor
 	return c, nil
 }
 
-func (u *uiContext) sshPull(entry txformat.Entry) (hostentry string, ct []byte, err error) {
+func (u *uiContext) sshPull(entry txlogs.Entry) (hostentry string, ct []byte, err error) {
 	address, path, config, err := sshConfig(entry)
 	if err != nil {
 		return "", nil, err
 	}
 
-	known := entry[txblob.KeyKnownHosts]
+	known := entry[blobformat.KeyKnownHosts]
 	asker := &hostAsker{u: u, known: known}
 	config.HostKeyCallback = asker.callback
 
@@ -330,13 +330,13 @@ func (u *uiContext) sshPull(entry txformat.Entry) (hostentry string, ct []byte, 
 	return asker.newHost, payload, nil
 }
 
-func (u *uiContext) sshPush(entry txformat.Entry, ct []byte) (hostentry string, err error) {
+func (u *uiContext) sshPush(entry txlogs.Entry, ct []byte) (hostentry string, err error) {
 	address, path, config, err := sshConfig(entry)
 	if err != nil {
 		return "", err
 	}
 
-	known := entry[txblob.KeyKnownHosts]
+	known := entry[blobformat.KeyKnownHosts]
 	asker := &hostAsker{u: u, known: known}
 	config.HostKeyCallback = asker.callback
 
@@ -348,8 +348,8 @@ func (u *uiContext) sshPush(entry txformat.Entry, ct []byte) (hostentry string, 
 	return asker.newHost, nil
 }
 
-func sshConfig(entry txformat.Entry) (address, path string, config *ssh.ClientConfig, err error) {
-	uri, err := url.Parse(entry[txblob.KeyURL])
+func sshConfig(entry txlogs.Entry) (address, path string, config *ssh.ClientConfig, err error) {
+	uri, err := url.Parse(entry[blobformat.KeyURL])
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -358,7 +358,7 @@ func sshConfig(entry txformat.Entry) (address, path string, config *ssh.ClientCo
 	port := uri.Port()
 	user := uri.User.Username()
 	pass, _ := uri.User.Password()
-	secretKey := entry[txblob.KeyPriv]
+	secretKey := entry[blobformat.KeyPriv]
 	path = uri.Path[1:]
 
 	if len(user) == 0 {
@@ -555,8 +555,8 @@ func (u *uiContext) syncAdd(kind string) error {
 			}
 			publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public))) + " @bpass"
 
-			u.store.Set(uuid, txblob.KeyPriv, string(bytes.TrimSpace(b)))
-			u.store.Set(uuid, txblob.KeyPub, publicStr)
+			u.store.Set(uuid, blobformat.KeyPriv, string(bytes.TrimSpace(b)))
+			u.store.Set(uuid, blobformat.KeyPub, publicStr)
 
 			infoColor.Printf("successfully generated new ed25519 key:\n%s\n", publicStr)
 
@@ -582,8 +582,8 @@ func (u *uiContext) syncAdd(kind string) error {
 			}
 			publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public))) + " @bpass"
 
-			u.store.Set(uuid, txblob.KeyPriv, string(bytes.TrimSpace(b)))
-			u.store.Store.Set(uuid, txblob.KeyPub, publicStr)
+			u.store.Set(uuid, blobformat.KeyPriv, string(bytes.TrimSpace(b)))
+			u.store.DB.Set(uuid, blobformat.KeyPub, publicStr)
 
 			infoColor.Printf("successfully generated new rsa-4096 key:\n%s\n", publicStr)
 
@@ -599,8 +599,8 @@ func (u *uiContext) syncAdd(kind string) error {
 		}
 
 		// Use raw-er sets to avoid timestamp spam
-		u.store.Store.Set(uuid, txblob.KeySync, "true")
-		u.store.Store.Set(uuid, txblob.KeyURL, uri.String())
+		u.store.DB.Set(uuid, blobformat.KeySync, "true")
+		u.store.DB.Set(uuid, blobformat.KeyURL, uri.String())
 
 		blob, err := u.store.Get(uuid)
 		if err != nil {
