@@ -5,7 +5,22 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/aarondl/bpass/pinentry"
+
+	"github.com/aarondl/color"
 )
+
+func (u *uiContext) promptPassword(prompt string) (string, error) {
+	password, err := pinentry.Password(color.Clean(prompt))
+	if err == nil {
+		return password, nil
+	} else if err != pinentry.ErrNotFound {
+		return "", err
+	}
+
+	return u.in.LineHidden(prompt)
+}
 
 func (u *uiContext) prompt(prompt string) (string, error) {
 	line, err := u.in.Line(prompt)

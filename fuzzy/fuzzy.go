@@ -1,3 +1,4 @@
+// Package fuzzy performs fuzzy searching with some special case considerations
 package fuzzy
 
 import (

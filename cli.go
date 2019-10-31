@@ -28,6 +28,8 @@ func parseCli() {
 	versionCmd.Description = "print version and exit"
 	lpassImportCmd.Description = "import lastpass csv by running `lpass export`"
 
+	parser.AdditionalHelpAppend = "bpass respects $EDITOR and $PINENTRY env vars"
+
 	parser.ShowHelpWithHFlag = false
 	parser.ShowHelpOnUnexpected = false
 
@@ -64,5 +66,8 @@ Flags:
   {{- if .Description}} {{.Description}}{{end}}
   {{- if and (.DefaultValue) (not (eq "false" .DefaultValue))}} ({{.DefaultValue}}){{end}}
   {{- end -}}
+{{- end}}{{if .AppendMessage}}
+
+{{.AppendMessage}}
 {{- end}}
 `

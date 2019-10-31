@@ -35,12 +35,12 @@ var (
 )
 
 func (u *uiContext) passwd() error {
-	initial, err := u.in.LineHidden(promptColor.Sprint("passphrase: "))
+	initial, err := u.promptPassword(promptColor.Sprint("passphrase: "))
 	if err != nil {
 		return err
 	}
 
-	verify, err := u.in.LineHidden(promptColor.Sprint("verify passphrase: "))
+	verify, err := u.promptPassword(promptColor.Sprint("verify passphrase: "))
 	if err != nil {
 		return err
 	}

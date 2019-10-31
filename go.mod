@@ -3,7 +3,7 @@ module github.com/aarondl/bpass
 go 1.13
 
 require (
-	github.com/aarondl/color v0.0.0-20191031040342-bac9f82c0a23
+	github.com/aarondl/color v0.0.0-20191031162153-2a82c25a0dcf
 	github.com/atotto/clipboard v0.1.2
 	github.com/chzyer/logex v1.1.10 // indirect
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e

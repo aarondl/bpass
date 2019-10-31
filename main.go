@@ -53,6 +53,7 @@ func main() {
 	ctx := new(uiContext)
 	if flagNoColor {
 		color.Disable = true
+		ctx.out = os.Stdout
 	} else {
 		writer := colorable.NewColorable(os.Stdout)
 		color.Writer = writer
@@ -139,12 +140,12 @@ func (u *uiContext) loadBlob() error {
 
 	var pwd string
 	if u.created {
-		pwd, err = u.in.LineHidden(promptColor.Sprint("passphrase: "))
+		pwd, err = u.promptPassword(promptColor.Sprint("passphrase: "))
 		if err != nil {
 			return err
 		}
 
-		verify, err := u.in.LineHidden(promptColor.Sprint("verify passphrase: "))
+		verify, err := u.promptPassword(promptColor.Sprint("verify passphrase: "))
 		if err != nil {
 			return err
 		}
@@ -159,7 +160,7 @@ func (u *uiContext) loadBlob() error {
 			return err
 		}
 	} else {
-		pwd, err = u.in.LineHidden(promptColor.Sprintf("%s passphrase: ", u.shortFilename))
+		pwd, err = u.promptPassword(promptColor.Sprintf("%s passphrase: ", u.shortFilename))
 		if err != nil {
 			return err
 		}
