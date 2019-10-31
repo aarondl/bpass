@@ -10,9 +10,9 @@ import (
 	"github.com/chzyer/readline"
 )
 
-func setupLineEditor(u *uiContext, out io.Writer) error {
+func setupLineEditor(u *uiContext) error {
 	var err error
-	u.in, err = newReadlineEditor(out)
+	u.in, err = newReadlineEditor(u.out)
 	return err
 }
 
@@ -24,12 +24,12 @@ type readlineEditor struct {
 }
 
 func newReadlineEditor(out io.Writer) (readlineEditor, error) {
-	instance, err := readline.NewEx(readlineConfig(nil))
+	instance, err := readline.NewEx(readlineConfig(out, nil))
 	if err != nil {
 		return readlineEditor{}, err
 	}
 
-	return readlineEditor{instance: instance}, nil
+	return readlineEditor{instance: instance, out: out}, nil
 }
 
 func readlineConfig(out io.Writer, entryCompleter func(string) []string) *readline.Config {

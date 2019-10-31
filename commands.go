@@ -20,26 +20,27 @@ import (
 	"github.com/aarondl/bpass/txblob"
 	"github.com/aarondl/bpass/txformat"
 
+	"github.com/aarondl/color"
 	"github.com/atotto/clipboard"
 	uuidpkg "github.com/gofrs/uuid"
-	"github.com/gookit/color"
 )
 
 var (
-	errColor         = color.FgLightRed
-	infoColor        = color.FgLightMagenta
-	inputPromptColor = color.FgYellow
-	keyColor         = color.FgLightGreen
-	passColor        = color.New(color.FgBlue, color.BgBlue)
+	errColor    = color.FgBrightRed
+	passColor   = color.FgBrightRed
+	infoColor   = color.FgBrightMagenta
+	promptColor = color.FgYellow
+	keyColor    = color.FgBrightGreen
+	hideColor   = color.Mix(color.FgBlue, color.BgBlue)
 )
 
 func (u *uiContext) passwd() error {
-	initial, err := u.in.LineHidden(inputPromptColor.Sprint("passphrase: "))
+	initial, err := u.in.LineHidden(promptColor.Sprint("passphrase: "))
 	if err != nil {
 		return err
 	}
 
-	verify, err := u.in.LineHidden(inputPromptColor.Sprint("verify passphrase: "))
+	verify, err := u.in.LineHidden(promptColor.Sprint("verify passphrase: "))
 	if err != nil {
 		return err
 	}
@@ -82,12 +83,12 @@ func (u *uiContext) addNew(name string) (err error) {
 			return err
 		}
 
-		email, err := u.prompt(inputPromptColor.Sprint("email: "))
+		email, err := u.prompt(promptColor.Sprint("email: "))
 		if err != nil {
 			return err
 		}
 
-		user, err := u.prompt(inputPromptColor.Sprint("user: "))
+		user, err := u.prompt(promptColor.Sprint("user: "))
 		if err != nil {
 			return err
 		}
@@ -148,7 +149,7 @@ func (u *uiContext) deleteEntry(name string) error {
 	errColor.Println("Including ALL history irrecoverably, are you sure you wish to proceed?")
 	fmt.Println()
 
-	line, err := u.prompt(inputPromptColor.Sprintf("type %q to proceed: ", name))
+	line, err := u.prompt(promptColor.Sprintf("type %q to proceed: ", name))
 	if err != nil {
 		errColor.Println("Aborted")
 		return nil
@@ -299,7 +300,7 @@ func (u *uiContext) set(search, key, value string) error {
 
 		return nil
 	} else if len(value) == 0 {
-		value, err = u.promptMultiline(inputPromptColor.Sprint("> "))
+		value, err = u.promptMultiline(promptColor.Sprint("> "))
 		if err != nil {
 			return err
 		}
@@ -340,7 +341,7 @@ func (u *uiContext) edit(search, key string) error {
 	if err != nil {
 		return err
 	}
-	fname := filepath.Join(os.TempDir(), "bp"+fuuid.String())
+	fname := filepath.Join(os.TempDir(), "bp"+fuuid.String()+".txt")
 
 	// Open file, ensure it doesn't exist with locked down user perms
 	tmp, err := os.OpenFile(fname, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0600)
@@ -390,33 +391,24 @@ func (u *uiContext) edit(search, key string) error {
 		return nil
 	}
 
-	// Run the editor
-	editor := os.Getenv("EDITOR")
-	if len(editor) == 0 {
-		editors := []string{"code", "vim", "sublime", "textmate", "notepad"}
-		for _, ed := range editors {
-			if _, err := exec.LookPath(ed); err == nil {
-				editor = ed
-				break
-			}
-		}
-	}
-
-	cmd := exec.Command(editor, fname)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	// Run the editor for the OS and wait until it exits
+	editExit := 0
+	if err = osutil.RunEditor(fname); err != nil {
 		e, ok := err.(*exec.ExitError)
-		if ok {
-			errColor.Printf("editor exit non-zero (%d), not saving value\n", e.ExitCode())
-			return nil
+		if !ok {
+			return err
 		}
+		editExit = e.ExitCode()
 	}
 
 	tmp, err = os.OpenFile(fname, os.O_RDWR, 0600)
 	if err != nil {
 		errColor.Println("failed to open tmp file to edit value:", err)
+		return nil
+	}
+
+	if editExit != 0 {
+		errColor.Printf("editor exit non-zero (%d), not saving value\n", editExit)
 		return nil
 	}
 
@@ -464,7 +456,7 @@ func (u *uiContext) addLabels(search string) error {
 	infoColor.Println("Enter labels, blank line, ctrl-d, or . to stop")
 	changed := false
 	for {
-		line, err := u.prompt(inputPromptColor.Sprint("> "))
+		line, err := u.prompt(promptColor.Sprint("> "))
 		if err == ErrEnd {
 			break
 		} else if err != nil {
@@ -576,7 +568,6 @@ func (u *uiContext) getPassword() (string, error) {
 
 	var err error
 	var choice, password string
-	passwordColor := color.FgLightRed
 	for {
 		if choice != "?" {
 			password, err = genPassword(length, upper, lower, number, basic, extra)
@@ -588,10 +579,10 @@ func (u *uiContext) getPassword() (string, error) {
 		}
 
 		if err == nil {
-			fmt.Println(inputPromptColor.Sprint("password:"), passwordColor.Sprint(password))
+			fmt.Println(promptColor.Sprint("password:"), passColor.Sprint(password))
 		}
 
-		choice, err = u.prompt(inputPromptColor.Sprint("u/l/n/b/e/y/m/enter/?> "))
+		choice, err = u.prompt(promptColor.Sprint("u/l/n/b/e/y/m/enter/?> "))
 		if err != nil {
 			return "", err
 		}
@@ -604,7 +595,7 @@ func (u *uiContext) getPassword() (string, error) {
 		case choice == "y":
 			return password, nil
 		case choice == "m":
-			b, err := u.in.LineHidden(inputPromptColor.Sprint("enter new password: "))
+			b, err := u.in.LineHidden(promptColor.Sprint("enter new password: "))
 			return string(b), err
 		case choice == "?":
 			help()
@@ -709,21 +700,21 @@ func (u *uiContext) show(search string, snapshot int) error {
 
 		switch k {
 		case txblob.KeyPass:
-			showHidden(txblob.KeyPass, blob.Get(txblob.KeyPass), width, indent)
+			showHidden(u, txblob.KeyPass, blob.Get(txblob.KeyPass), width, indent)
 		case txblob.KeyLabels:
-			showKeyValue(k, strings.ReplaceAll(val, ",", ", "), width, indent)
+			showKeyValue(u, k, strings.ReplaceAll(val, ",", ", "), width, indent)
 		case txblob.KeyTwoFactor:
 			t, err := blob.TwoFactor()
 			if err != nil {
 				fmt.Println("Error retrieving two factor:", err)
 			} else if len(t) != 0 {
-				showKeyValue("totp", t, width, indent)
+				showKeyValue(u, txblob.KeyTwoFactor, t, width, indent)
 			}
 		default:
 			if strings.ContainsRune(val, '\n') {
-				showMultiline(k, val, width, indent)
+				showMultiline(u, k, val, width, indent)
 			} else {
-				showKeyValue(k, val, width, indent)
+				showKeyValue(u, k, val, width, indent)
 			}
 		}
 	}
@@ -731,27 +722,27 @@ func (u *uiContext) show(search string, snapshot int) error {
 	if update, err := blob.Updated(); err != nil {
 		return err
 	} else if !update.IsZero() {
-		showKeyValue("updated", update.Format(time.RFC3339), width, indent)
+		showKeyValue(u, "updated", update.Format(time.RFC3339), width, indent)
 	}
 
 	if snaps > 0 && snapshot == 0 {
-		showKeyValue("snaps", strconv.Itoa(snaps), width, indent)
+		showKeyValue(u, "snaps", strconv.Itoa(snaps), width, indent)
 	}
 
 	return nil
 }
 
-func showKeyValue(key, value string, width, indent int) {
+func showKeyValue(u *uiContext, key, value string, width, indent int) {
 	ind := strings.Repeat(" ", indent)
-	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, key+":"), value)
+	fmt.Fprintf(u.out, "%s%s %s\n", ind, keyColor.Sprintf("%*s", width, key+":"), value)
 }
 
-func showHidden(key, value string, width, indent int) {
+func showHidden(u *uiContext, key, value string, width, indent int) {
 	ind := strings.Repeat(" ", indent)
-	fmt.Printf("%s%s %s\n", ind, keyColor.Sprintf("%*s", width, key+":"), passColor.Sprint(value))
+	fmt.Fprintf(u.out, "%s%s %s\n", ind, keyColor.Sprintf("%*s", width, key+":"), hideColor.Sprint(value))
 }
 
-func showMultiline(key string, val string, width, indent int) {
+func showMultiline(u *uiContext, key string, val string, width, indent int) {
 	lines := strings.Split(val, "\n")
 
 	lineIndent := indent * 2
@@ -761,8 +752,8 @@ func showMultiline(key string, val string, width, indent int) {
 	ind := strings.Repeat(" ", indent)
 	lineInd := strings.Repeat(" ", lineIndent)
 
-	fmt.Printf("%s%s\n", ind, keyColor.Sprintf("%*s", width, key+":"))
-	fmt.Println(lineInd + strings.TrimSpace(strings.Join(lines, "\n"+lineInd)))
+	fmt.Fprintf(u.out, "%s%s\n", ind, keyColor.Sprintf("%*s", width, key+":"))
+	fmt.Fprintln(u.out, lineInd+strings.TrimSpace(strings.Join(lines, "\n"+lineInd)))
 }
 
 func (u *uiContext) openurl(search string) error {

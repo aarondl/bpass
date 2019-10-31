@@ -29,3 +29,18 @@ func OpenURL(uri string) error {
 
 	return nil
 }
+
+// RunEditor runs the best possible editor on osx
+func RunEditor(filename string) error {
+	editor := os.Getenv("EDITOR")
+	if len(editor) == 0 {
+		cmd := exec.Command("open", "-W", filename)
+		return cmd.Run()
+	}
+
+	cmd := exec.Command(editor, filename)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}

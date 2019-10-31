@@ -4,7 +4,7 @@ package main
 
 import (
 	"bufio"
-	"errors"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -14,16 +14,14 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// handle kinds
 const (
 	stdInputHandle  = uint32(0xFFFFFFF6) // -10
 	stdOutputHandle = uint32(0xFFFFFFF5) // -11
 	stdErrHandle    = uint32(0xFFFFFFF4) // -12
-	invalidHandle   = uint32(0xFFFFFFFF)
 )
 
-func setupLineEditor(u *uiContext, out io.Writer) error {
-	u.in = newScanEditor(out)
+func setupLineEditor(u *uiContext) error {
+	u.in = newScanEditor(u.out)
 	return nil
 }
 
@@ -43,7 +41,7 @@ func newScanEditor(out io.Writer) *scanEditor {
 func (s *scanEditor) Line(prompt string) (string, error) {
 	fmt.Fprint(s, prompt)
 	if !s.Scanner.Scan() {
-		return "", errors.New("failed to get user input")
+		return "", ErrInterrupt
 	}
 
 	return s.Scanner.Text(), nil
@@ -76,7 +74,7 @@ func (s *scanEditor) LineHidden(prompt string) (string, error) {
 
 	fmt.Fprint(s, prompt)
 
-	var builder strings.Builder
+	var builder bytes.Buffer
 	var buf [256]uint16
 	var nRead uint32
 Loop:
@@ -88,8 +86,13 @@ Loop:
 
 		for i, c := range buf {
 			switch c {
+			case 0x08:
+				// Backspace
+				builder.Truncate(builder.Len() - 1)
+				continue Loop
 			case 0x0D, 0x0A:
 				// Newline
+				fmt.Println()
 				builder.WriteString(string(utf16.Decode(buf[:i])))
 				break Loop
 			case 0x04:

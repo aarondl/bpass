@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/aarondl/bpass/txblob"
-	"github.com/gookit/color"
+	"github.com/aarondl/color"
 )
 
 const replHelp = `Bpass repl uses analogs to basic unix commands for general
@@ -57,9 +57,9 @@ Common Arguments:
 `
 
 const (
-	promptColor  = color.FgLightBlue
-	normalPrompt = "(%s)> "
-	dirPrompt    = "(%s):%s> "
+	mainPromptColor = color.FgBrightBlue
+	normalPrompt    = "(%s)> "
+	dirPrompt       = "(%s):%s> "
 )
 
 type repl struct {
@@ -70,7 +70,7 @@ type repl struct {
 }
 
 func (r *repl) run() error {
-	r.prompt = promptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
+	r.prompt = mainPromptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 	r.ctxEntry = ""
 
 	for {
@@ -126,7 +126,7 @@ func (r *repl) run() error {
 
 			if err == nil && r.ctxEntry == name {
 				r.ctxEntry = ""
-				r.prompt = promptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
+				r.prompt = mainPromptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 			}
 
 		case "rmk":
@@ -153,7 +153,7 @@ func (r *repl) run() error {
 		case "cd":
 			switch len(splits) {
 			case 0:
-				r.prompt = promptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
+				r.prompt = mainPromptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 			case 1:
 				var uuid string
 				uuid, err = r.ctx.findOne(splits[0])
@@ -170,7 +170,7 @@ func (r *repl) run() error {
 				}
 
 				r.ctxEntry = blob.Name()
-				r.prompt = promptColor.Sprintf(dirPrompt, r.ctx.shortFilename, r.ctxEntry)
+				r.prompt = mainPromptColor.Sprintf(dirPrompt, r.ctx.shortFilename, r.ctxEntry)
 			default:
 				fmt.Println("cd needs an argument")
 			}
@@ -393,7 +393,7 @@ func (r *repl) run() error {
 		if unknownCmd {
 			fmt.Println(`unknown command, try "help"`)
 		} else {
-			r.ctx.inAddHistory(line)
+			r.ctx.in.AddHistory(line)
 		}
 	}
 }

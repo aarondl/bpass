@@ -15,7 +15,7 @@ func importLastpass(u *uiContext) error {
 	if !u.created {
 		infoColor.Println("this is not a new file")
 		infoColor.Println("are you sure you wish to import into it?")
-		line, err := u.prompt(inputPromptColor.Sprint("proceed (y/N): "))
+		line, err := u.prompt(promptColor.Sprint("proceed (y/N): "))
 		if err != nil {
 			return err
 		}

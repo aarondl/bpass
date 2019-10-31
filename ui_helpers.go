@@ -95,7 +95,7 @@ func (u *uiContext) getString(key string) (string, error) {
 	var err error
 
 Again:
-	str, err = u.prompt(inputPromptColor.Sprint(key + ": "))
+	str, err = u.prompt(promptColor.Sprint(key + ": "))
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +113,7 @@ func (u *uiContext) getInt(key string, min, max int) (int, error) {
 	var integer int
 
 Again:
-	str, err = u.prompt(inputPromptColor.Sprint(key + ": "))
+	str, err = u.prompt(promptColor.Sprint(key + ": "))
 	if err != nil {
 		return 0, err
 	}
@@ -141,7 +141,7 @@ func (u *uiContext) getMenuChoice(prompt string, items []string) (int, error) {
 
 Again:
 	for i, item = range items {
-		inputPromptColor.Printf(" %d) %s\n", i+1, item)
+		promptColor.Printf(" %d) %s\n", i+1, item)
 	}
 	choice, err = u.prompt(infoColor.Sprint(prompt))
 	if err != nil {

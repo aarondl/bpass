@@ -13,6 +13,7 @@ import (
 	"github.com/aarondl/bpass/txblob"
 	"github.com/aarondl/bpass/txformat"
 
+	"github.com/aarondl/color"
 	"github.com/atotto/clipboard"
 	colorable "github.com/mattn/go-colorable"
 )
@@ -49,14 +50,16 @@ func main() {
 		return
 	}
 
-	var err error
 	ctx := new(uiContext)
 	if flagNoColor {
-		ctx.out = colorable.NewNonColorable(os.Stdout)
+		color.Disable = true
 	} else {
-		ctx.out = colorable.NewColorable(os.Stdout)
+		writer := colorable.NewColorable(os.Stdout)
+		color.Writer = writer
+		ctx.out = writer
 	}
 
+	var err error
 	ctx.filename, err = filepath.Abs(flagFile)
 	if err != nil {
 		fmt.Printf("failed to find the absolute path to: %q\n", flagFile)
@@ -67,7 +70,7 @@ func main() {
 
 	// setup readline needs to have the filenames parsed and ready
 	// to use from above
-	if err = setupLineEditor(ctx, io.Writer); err != nil {
+	if err = setupLineEditor(ctx); err != nil {
 		fmt.Printf("failed to setup line editor: %+v\n", err)
 		goto Exit
 	}
@@ -81,36 +84,37 @@ func main() {
 	switch {
 	case lpassImportCmd.Used:
 		if err = importLastpass(ctx); err != nil {
-			errColor.Println("error occurred: %+v\nexiting without saving", err)
+			fmt.Printf("error occurred: %+v\nexiting without saving", err)
 			goto Exit
 		}
 	default:
 		if err = r.run(); err != nil {
 			if err == ErrInterrupt {
-				errColor.Println("exiting, did not save file")
+				fmt.Println("exiting, did not save file")
 				goto Exit
 			}
-			errColor.Printf("error occurred: %+v\n", err)
+			fmt.Printf("error occurred: %+v\n", err)
 			goto Exit
 		}
 	}
 
 	// save the changed data
 	if err = ctx.saveBlob(); err != nil {
-		errColor.Printf("failed to save file: %+v\n", err)
+		fmt.Printf("failed to save file: %+v\n", err)
 		goto Exit
 	}
 
 Exit:
 	if !flagNoClearClip {
 		if err = clipboard.WriteAll(""); err != nil {
-			errColor.Println("failed to clear the clipboard")
+			fmt.Println("failed to clear the clipboard")
 		}
 	}
 
-	if err = ctx.inClose(); err != nil {
-		errColor.Println("failed to close terminal properly:", err)
+	if err = ctx.in.Close(); err != nil {
+		fmt.Println("failed to close terminal properly:", err)
 	}
+
 	if err != nil {
 		os.Exit(1)
 	}
@@ -135,12 +139,12 @@ func (u *uiContext) loadBlob() error {
 
 	var pwd string
 	if u.created {
-		pwd, err = u.in.LineHidden(inputPromptColor.Sprint("passphrase: "))
+		pwd, err = u.in.LineHidden(promptColor.Sprint("passphrase: "))
 		if err != nil {
 			return err
 		}
 
-		verify, err := u.in.LineHidden(inputPromptColor.Sprint("verify passphrase: "))
+		verify, err := u.in.LineHidden(promptColor.Sprint("verify passphrase: "))
 		if err != nil {
 			return err
 		}
@@ -155,7 +159,7 @@ func (u *uiContext) loadBlob() error {
 			return err
 		}
 	} else {
-		pwd, err = u.in.LineHidden(inputPromptColor.Sprintf("%s passphrase: ", u.shortFilename))
+		pwd, err = u.in.LineHidden(promptColor.Sprintf("%s passphrase: ", u.shortFilename))
 		if err != nil {
 			return err
 		}

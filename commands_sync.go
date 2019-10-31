@@ -248,7 +248,7 @@ func decryptBlob(u *uiContext, name string, ct []byte) (pt []byte, err error) {
 			return nil, err
 		}
 
-		pass, err = u.prompt(inputPromptColor.Sprintf("%s passphrase: ", name))
+		pass, err = u.prompt(promptColor.Sprintf("%s passphrase: ", name))
 
 		if err != nil || len(pass) == 0 {
 			return nil, nil
@@ -437,7 +437,7 @@ func (h *hostAsker) callback(hostname string, remote net.Addr, key ssh.PublicKey
 
 	infoColor.Printf("(ssh) connected to: %s (%s)\nverify pubkey: %s %s\n",
 		hostname, addr, keyType, sha256FingerPrint)
-	line, err := h.u.prompt(inputPromptColor.Sprint("Save this host (y/N): "))
+	line, err := h.u.prompt(promptColor.Sprint("Save this host (y/N): "))
 	if err != nil {
 		return fmt.Errorf("failed to get user confirmation on host: %w", err)
 	}
@@ -497,7 +497,7 @@ func (u *uiContext) syncAdd(kind string) error {
 
 		port := "22"
 		for {
-			port, err = u.prompt(inputPromptColor.Sprint("port (22): "))
+			port, err = u.prompt(promptColor.Sprint("port (22): "))
 			if err != nil {
 				return err
 			}
@@ -527,8 +527,8 @@ func (u *uiContext) syncAdd(kind string) error {
 		uri.Host = net.JoinHostPort(host, port)
 		uri.Path = file
 
-		inputPromptColor.Println("Key type:")
-		choice, err := u.getMenuChoice(inputPromptColor.Sprint("> "), []string{"ED25519", "RSA 4096", "Password"})
+		promptColor.Println("Key type:")
+		choice, err := u.getMenuChoice(promptColor.Sprint("> "), []string{"ED25519", "RSA 4096", "Password"})
 		if err != nil {
 			return err
 		}
