@@ -1,4 +1,4 @@
-// +build !windows linux darwin
+// +build linux darwin
 
 package main
 
@@ -106,7 +106,7 @@ func (r readlineEditor) AddHistory(line string) {
 
 // SetEntryCompleter sets a completion function for entries.
 func (r readlineEditor) SetEntryCompleter(entryCompleter func(string) []string) {
-	r.instance.SetConfig(readlineConfig(entryCompleter))
+	r.instance.SetConfig(readlineConfig(r.out, entryCompleter))
 }
 
 func readlineAutocompleter(entryCompleter func(string) []string) readline.AutoCompleter {

@@ -1,4 +1,4 @@
-// +build windows !darwin !linux
+// +build windows
 
 package main
 
