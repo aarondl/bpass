@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/aarondl/bpass/crypt"
 	"github.com/aarondl/bpass/blobformat"
+	"github.com/aarondl/bpass/crypt"
 	"github.com/aarondl/bpass/txlogs"
 
 	"github.com/aarondl/color"
@@ -43,6 +43,9 @@ var (
 )
 
 func main() {
+	var r repl
+	var err error
+
 	parseCli()
 
 	if versionCmd.Used {
@@ -60,21 +63,31 @@ func main() {
 		ctx.out = writer
 	}
 
-	var err error
-	ctx.filename, err = filepath.Abs(flagFile)
-	if err != nil {
-		fmt.Printf("failed to find the absolute path to: %q\n", flagFile)
-		os.Exit(1)
-	}
-	ctx.shortFilename = shortPath(ctx.filename)
-	r := repl{ctx: ctx}
-
 	// setup readline needs to have the filenames parsed and ready
 	// to use from above
 	if err = setupLineEditor(ctx); err != nil {
 		fmt.Printf("failed to setup line editor: %+v\n", err)
 		goto Exit
 	}
+
+	if genCmd.Used {
+		passwd, err := ctx.getPassword()
+		if err != nil {
+			fmt.Printf("failed to get a password: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Println(passwd)
+		return
+	}
+
+	ctx.filename, err = filepath.Abs(flagFile)
+	if err != nil {
+		fmt.Printf("failed to find the absolute path to: %q\n", flagFile)
+		os.Exit(1)
+	}
+	ctx.shortFilename = shortPath(ctx.filename)
+	r = repl{ctx: ctx}
 
 	// loadBlob uses readline and the filenames to load the blob
 	if err = ctx.loadBlob(); err != nil {

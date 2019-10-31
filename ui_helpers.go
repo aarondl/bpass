@@ -191,10 +191,10 @@ func (u *uiContext) getPassword() (string, error) {
 		if len(splits) == 1 {
 			if *n >= 0 {
 				*n = -1
-				fmt.Printf("%s: off\n", keyColor.Sprint(name))
+				fmt.Fprintf(u.out, "%s: off\n", keyColor.Sprint(name))
 			} else {
 				*n = 0
-				fmt.Printf("%s: on\n", keyColor.Sprint(name))
+				fmt.Fprintf(u.out, "%s: on\n", keyColor.Sprint(name))
 			}
 			return
 		}
@@ -233,7 +233,7 @@ func (u *uiContext) getPassword() (string, error) {
 		}
 
 		if err == nil {
-			fmt.Println(promptColor.Sprint("password:"), passColor.Sprint(password))
+			fmt.Fprintln(u.out, promptColor.Sprint("password:"), passColor.Sprint(password))
 		}
 
 		choice, err = u.prompt(promptColor.Sprint("u/l/n/b/e/y/m/enter/?> "))
@@ -249,7 +249,7 @@ func (u *uiContext) getPassword() (string, error) {
 		case choice == "y":
 			return password, nil
 		case choice == "m":
-			b, err := u.in.LineHidden(promptColor.Sprint("enter new password: "))
+			b, err := u.promptPassword(promptColor.Sprint("enter new password: "))
 			return string(b), err
 		case choice == "?":
 			help()
