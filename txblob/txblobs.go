@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aarondl/bpass/fuzzy"
 	"github.com/aarondl/bpass/txformat"
 
-	"github.com/lithammer/fuzzysearch/fuzzy"
 	"github.com/pquerna/otp"
 )
 
@@ -107,7 +107,7 @@ AllKeys:
 		name := blob.Name()
 
 		if len(fragments) == 1 {
-			if !fuzzy.MatchFold(fragments[0], name) {
+			if !fuzzy.Match(name, fragments[0]) {
 				continue AllKeys
 			}
 		} else {
@@ -117,7 +117,7 @@ AllKeys:
 			}
 
 			for i, f := range fragments {
-				if !fuzzy.MatchFold(f, keyFrags[i]) {
+				if !fuzzy.Match(keyFrags[i], f) {
 					continue AllKeys
 				}
 			}
