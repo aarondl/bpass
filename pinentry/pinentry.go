@@ -28,7 +28,10 @@ var (
 )
 
 // Password retrieves a password from a pinentry program if it exists.
-// If a pinentry program could not be found it returns ErrNotFound
+// If a pinentry program could not be found it returns ErrNotFound.
+//
+// If the user cancel's the pinentry it will just return an empty string
+// and no error.
 func Password(prompt string) (password string, err error) {
 	program := os.Getenv("PINENTRY")
 	if len(program) == 0 {
@@ -108,6 +111,8 @@ func Password(prompt string) (password string, err error) {
 	if strings.HasPrefix(resp, "D ") {
 		password = resp[2:]
 		resp = getLine()
+	} else if strings.HasPrefix(resp, "ERR") && strings.Contains(resp, "Operation cancelled") {
+		return "", nil
 	}
 	if resp != "OK" {
 		return "", fmt.Errorf("rogue pinentry program")
