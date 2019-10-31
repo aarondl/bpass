@@ -1,4 +1,4 @@
-// +build !liner
+// +build !windows linux darwin
 
 package main
 
@@ -10,9 +10,9 @@ import (
 	"github.com/chzyer/readline"
 )
 
-func setupLineEditor(u *uiContext) error {
+func setupLineEditor(u *uiContext, out io.Writer) error {
 	var err error
-	u.term, err = newReadlineEditor()
+	u.in, err = newReadlineEditor(out)
 	return err
 }
 
@@ -20,9 +20,10 @@ type readlineEditor struct {
 	currentPrompt    string
 	promptNeedsReset bool
 	instance         *readline.Instance
+	out              io.Writer
 }
 
-func newReadlineEditor() (readlineEditor, error) {
+func newReadlineEditor(out io.Writer) (readlineEditor, error) {
 	instance, err := readline.NewEx(readlineConfig(nil))
 	if err != nil {
 		return readlineEditor{}, err
@@ -31,7 +32,7 @@ func newReadlineEditor() (readlineEditor, error) {
 	return readlineEditor{instance: instance}, nil
 }
 
-func readlineConfig(entryCompleter func(string) []string) *readline.Config {
+func readlineConfig(out io.Writer, entryCompleter func(string) []string) *readline.Config {
 	var completer readline.AutoCompleter
 	if entryCompleter != nil {
 		completer = readlineAutocompleter(entryCompleter)
@@ -50,7 +51,7 @@ func readlineConfig(entryCompleter func(string) []string) *readline.Config {
 		EOFPrompt:       "exit",
 
 		Stdin:  os.Stdin,
-		Stdout: os.Stdout,
+		Stdout: out,
 		Stderr: os.Stderr,
 
 		UniqueEditLine: false,

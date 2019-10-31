@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -13,16 +14,18 @@ import (
 	"github.com/aarondl/bpass/txformat"
 
 	"github.com/atotto/clipboard"
-	"github.com/gookit/color"
+	colorable "github.com/mattn/go-colorable"
 )
 
 type uiContext struct {
-	term LineEditor
+	// Input
+	in LineEditor
+	// Output
+	out io.Writer
 
+	created       bool
 	filename      string
 	shortFilename string
-
-	created bool
 
 	// Decrypted and decoded storage
 	store txblob.Blobs
@@ -46,12 +49,14 @@ func main() {
 		return
 	}
 
-	if flagNoColor {
-		color.Disable()
-	}
-
 	var err error
 	ctx := new(uiContext)
+	if flagNoColor {
+		ctx.out = colorable.NewNonColorable(os.Stdout)
+	} else {
+		ctx.out = colorable.NewColorable(os.Stdout)
+	}
+
 	ctx.filename, err = filepath.Abs(flagFile)
 	if err != nil {
 		fmt.Printf("failed to find the absolute path to: %q\n", flagFile)
@@ -62,7 +67,7 @@ func main() {
 
 	// setup readline needs to have the filenames parsed and ready
 	// to use from above
-	if err = setupLineEditor(ctx); err != nil {
+	if err = setupLineEditor(ctx, io.Writer); err != nil {
 		fmt.Printf("failed to setup line editor: %+v\n", err)
 		goto Exit
 	}
@@ -103,7 +108,7 @@ Exit:
 		}
 	}
 
-	if err = ctx.term.Close(); err != nil {
+	if err = ctx.inClose(); err != nil {
 		errColor.Println("failed to close terminal properly:", err)
 	}
 	if err != nil {
@@ -130,12 +135,12 @@ func (u *uiContext) loadBlob() error {
 
 	var pwd string
 	if u.created {
-		pwd, err = u.term.LineHidden(inputPromptColor.Sprint("passphrase: "))
+		pwd, err = u.in.LineHidden(inputPromptColor.Sprint("passphrase: "))
 		if err != nil {
 			return err
 		}
 
-		verify, err := u.term.LineHidden(inputPromptColor.Sprint("verify passphrase: "))
+		verify, err := u.in.LineHidden(inputPromptColor.Sprint("verify passphrase: "))
 		if err != nil {
 			return err
 		}
@@ -150,7 +155,7 @@ func (u *uiContext) loadBlob() error {
 			return err
 		}
 	} else {
-		pwd, err = u.term.LineHidden(inputPromptColor.Sprintf("%s passphrase: ", u.shortFilename))
+		pwd, err = u.in.LineHidden(inputPromptColor.Sprintf("%s passphrase: ", u.shortFilename))
 		if err != nil {
 			return err
 		}

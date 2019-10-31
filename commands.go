@@ -34,12 +34,12 @@ var (
 )
 
 func (u *uiContext) passwd() error {
-	initial, err := u.term.LineHidden(inputPromptColor.Sprint("passphrase: "))
+	initial, err := u.in.LineHidden(inputPromptColor.Sprint("passphrase: "))
 	if err != nil {
 		return err
 	}
 
-	verify, err := u.term.LineHidden(inputPromptColor.Sprint("verify passphrase: "))
+	verify, err := u.in.LineHidden(inputPromptColor.Sprint("verify passphrase: "))
 	if err != nil {
 		return err
 	}
@@ -604,7 +604,7 @@ func (u *uiContext) getPassword() (string, error) {
 		case choice == "y":
 			return password, nil
 		case choice == "m":
-			b, err := u.term.LineHidden(inputPromptColor.Sprint("enter new password: "))
+			b, err := u.in.LineHidden(inputPromptColor.Sprint("enter new password: "))
 			return string(b), err
 		case choice == "?":
 			help()
