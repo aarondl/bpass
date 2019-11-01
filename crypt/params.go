@@ -147,6 +147,8 @@ func (p *Params) RemoveUser(username string) error {
 	copy(p.MKeys[index:], p.MKeys[index+1:])
 	p.MKeys = p.MKeys[:len(p.MKeys)-1]
 
+	p.NUsers--
+
 	return nil
 }
 

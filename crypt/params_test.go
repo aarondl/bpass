@@ -55,11 +55,25 @@ func TestParamsRemoveUser(t *testing.T) {
 	testMust(p.AddUser("user1", testKey, testSalt))
 	testMust(p.AddUser("user2", testKey, testSalt))
 
-	if err := p.AddUser("user1", testKey, testSalt); err == nil {
-		t.Error("should have had an error for adding the same user")
-	}
-
 	checkParamLengths(t, p, 2)
+	testMust(p.RemoveUser("user2"))
+	checkParamLengths(t, p, 1)
+	testMust(p.RemoveUser("user1"))
+	if len(p.Keys) != 1 {
+		t.Error("keys was wrong length")
+	}
+	if len(p.Salts) != 1 {
+		t.Error("salts was wrong length")
+	}
+	if len(p.Users) != 0 {
+		t.Error("users was wrong length")
+	}
+	if len(p.IVs) != 0 {
+		t.Error("ivs was wrong length")
+	}
+	if len(p.MKeys) != 0 {
+		t.Error("mkeys was wrong length")
+	}
 }
 
 func TestParamsRekey(t *testing.T) {
@@ -105,7 +119,31 @@ func TestParamsRekey(t *testing.T) {
 	}
 }
 
-func TestParamsRekeyAll(t *testing.T) {
+func TestParamsRekeyAllSingle(t *testing.T) {
+	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("skipping long test")
+	}
+
+	var p Params
+	p.SetSingleUser(testKey, testSalt)
+	pwds, err := p.RekeyAll(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pwds) != 1 {
+		t.Error("not enough passwords:", pwds)
+	}
+	if bytes.Equal(p.Keys[0], testKey) {
+		t.Error("key was not regenerated")
+	}
+	if bytes.Equal(p.Salts[0], testSalt) {
+		t.Error("salt was not regenerated")
+	}
+}
+
+func TestParamsRekeyAllMulti(t *testing.T) {
 	t.Parallel()
 
 	if testing.Short() {
@@ -183,15 +221,15 @@ func checkParamLengths(t *testing.T, p Params, n int) {
 		t.Error("nusers wrong:", p.NUsers)
 	}
 	if len(p.Keys) != n {
-		t.Error("users wrong length:", len(p.Users))
+		t.Error("keys wrong length:", len(p.Keys))
 	}
 	if len(p.Salts) != n {
-		t.Error("users wrong length:", len(p.Users))
+		t.Error("salts wrong length:", len(p.Salts))
 	}
 	if len(p.IVs) != n {
-		t.Error("users wrong length:", len(p.Users))
+		t.Error("ivs wrong length:", len(p.IVs))
 	}
 	if len(p.MKeys) != n {
-		t.Error("users wrong length:", len(p.Users))
+		t.Error("mkeys wrong length:", len(p.MKeys))
 	}
 }
