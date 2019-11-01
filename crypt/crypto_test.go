@@ -9,6 +9,10 @@ import (
 func TestCrypt(t *testing.T) {
 	t.Parallel()
 
+	if testing.Short() {
+		t.Skip("skipping long test")
+	}
+
 	passphrase := []byte("hunter42")
 	plaintext := []byte("plaintext goes here")
 
@@ -25,18 +29,147 @@ func TestCrypt(t *testing.T) {
 			t.Errorf("%d) failed to derive key: %v", v, err)
 		}
 
-		ciphertext, err := Encrypt(v, key, salt, plaintext)
+		var p Params
+		p.SetSingleUser(key, salt)
+		ciphertext, err := Encrypt(v, &p, plaintext)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%d) %v", v, err)
 		}
 
 		if bytes.Contains(ciphertext, plaintext) {
-			t.Error("the plain text is visible")
+			t.Errorf("%d) the plain text is visible", v)
 		}
 
-		_, gotPlaintext, err := Decrypt(passphrase, ciphertext)
+		version, p, gotPlaintext, err := Decrypt(nil, passphrase, nil, nil, ciphertext)
 		if err != nil {
 			t.Error(err)
+		}
+
+		if version != v {
+			t.Error("version was wrong")
+		}
+
+		if !bytes.Equal(key, p.Keys[0]) {
+			t.Error("key was wrong")
+		}
+		if !bytes.Equal(salt, p.Salts[0]) {
+			t.Error("salt was wrong")
+		}
+
+		if !bytes.Equal(plaintext, gotPlaintext) {
+			t.Errorf("want: %s, got: %s", plaintext, gotPlaintext)
+		}
+
+		// Test fast path decryption where we don't derive the key
+		_, _, gotPlaintext, err = Decrypt(nil, nil, key, salt, ciphertext)
+		if err != nil {
+			t.Fatalf("%d) %v", v, err)
+		}
+
+		if !bytes.Equal(plaintext, gotPlaintext) {
+			t.Errorf("want: %s, got: %s", plaintext, gotPlaintext)
+		}
+	}
+}
+
+func TestCryptMulti(t *testing.T) {
+	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("skipping long test")
+	}
+
+	passphrase := []byte("hunter42")
+	plaintext := []byte("plaintext goes here")
+
+	var versionNumbers []int
+	for v := range versions {
+		versionNumbers = append(versionNumbers, v)
+	}
+
+	sort.Ints(versionNumbers)
+
+	for _, v := range versionNumbers {
+		key1, salt1, err := DeriveKey(v, passphrase)
+		if err != nil {
+			t.Errorf("%d) failed to derive key: %v", v, err)
+		}
+		key2, salt2, err := DeriveKey(v, passphrase)
+		if err != nil {
+			t.Errorf("%d) failed to derive key: %v", v, err)
+		}
+
+		var p Params
+		p.AddUser("user1", key1, salt1)
+		p.AddUser("user2", key2, salt2)
+
+		ciphertext, err := Encrypt(v, &p, plaintext)
+		if err != nil {
+			t.Fatalf("%d) %v", v, err)
+		}
+
+		if bytes.Contains(ciphertext, plaintext) {
+			t.Errorf("%d) the plain text is visible", v)
+		}
+
+		version, p, gotPlaintext, err := Decrypt([]byte("user1"), passphrase, nil, nil, ciphertext)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if version != v {
+			t.Error("version was wrong")
+		}
+
+		if p.NUsers != 2 {
+			t.Error("nusers was wrong:", p.NUsers)
+		}
+
+		if !bytes.Equal(key1, p.Keys[0]) {
+			t.Errorf("%d) key was wrong", v)
+		}
+		if !bytes.Equal(salt1, p.Salts[0]) {
+			t.Errorf("%d) salt was wrong", v)
+		}
+		if p.Keys[1] != nil {
+			t.Errorf("%d) key was wrong", v)
+		}
+		if !bytes.Equal(salt2, p.Salts[1]) {
+			t.Errorf("%d) salt was wrong", v)
+		}
+
+		if len(p.IVs) != 2 {
+			t.Error("ivs was wrong")
+		}
+		for _, i := range p.IVs {
+			if len(i) == 0 {
+				t.Errorf("%d) ivs[%d] was empty", v, i)
+			}
+		}
+		if len(p.MKeys) != 2 {
+			t.Error("mkeys was wrong")
+		}
+		for _, i := range p.MKeys {
+			if len(i) == 0 {
+				t.Errorf("%d) mkeys[%d] was empty", v, i)
+			}
+		}
+
+		if len(p.IVM) == 0 {
+			t.Errorf("%d) IVM was empty", v)
+		}
+		if len(p.Master) == 0 {
+			t.Errorf("%d) master was empty", v)
+		}
+
+		if !bytes.Equal(plaintext, gotPlaintext) {
+			t.Errorf("want: %s, got: %s", plaintext, gotPlaintext)
+		}
+
+		// Test fast path decryption where we don't derive the key
+		_, _, gotPlaintext, err = Decrypt([]byte("user2"), nil, key2, salt2, ciphertext)
+		if err != nil {
+			t.Fatalf("%d) %v", v, err)
 		}
 
 		if !bytes.Equal(plaintext, gotPlaintext) {
@@ -92,6 +225,10 @@ func TestDecryptV0(t *testing.T) {
 
 func TestKeyDerivation(t *testing.T) {
 	t.Parallel()
+
+	if testing.Short() {
+		t.Skip("skipping long test")
+	}
 
 	testPass := []byte("hunter42")
 	testSalt := []byte("abcdefgh12345678")
