@@ -30,11 +30,11 @@ type uiContext struct {
 
 	// Decrypted and decoded storage
 	store blobformat.Blobs
-	// save key + salt for encrypting later
-	// save password for decrypting sync'd copies
-	pass string
-	key  []byte
-	salt []byte
+
+	// save user & password for syncing later
+	user   string
+	pass   string
+	params *crypt.Params
 }
 
 var (
@@ -168,30 +168,43 @@ func (u *uiContext) loadBlob() error {
 		}
 
 		// Derive a new key from the password for later encryption
-		u.key, u.salt, err = crypt.DeriveKey(cryptVersion, []byte(pwd))
-		if err != nil {
-			return err
-		}
-	} else {
-		pwd, err = u.promptPassword(promptColor.Sprintf("%s passphrase: ", u.shortFilename))
+		key, salt, err := crypt.DeriveKey(cryptVersion, []byte(pwd))
 		if err != nil {
 			return err
 		}
 
+		u.params = new(crypt.Params)
+		u.params.SetSingleUser(key, salt)
+	} else {
 		// Read in the file, decrypt it, parse the blob data.
 		payload, err := ioutil.ReadFile(flagFile)
 		if err != nil {
 			return err
 		}
 
-		meta, pt, err := crypt.Decrypt([]byte(pwd), payload)
+		var user string
+		var ok bool
+		if ok, err = crypt.IsMultiUser(payload); err != nil {
+			return err
+		} else if ok {
+			user, err = u.prompt(promptColor.Sprintf("%s user: ", u.shortFilename))
+			if err != nil {
+				return err
+			}
+		}
+
+		pwd, err = u.promptPassword(promptColor.Sprintf("%s passphrase: ", u.shortFilename))
 		if err != nil {
 			return err
 		}
 
+		_, params, pt, err := crypt.Decrypt([]byte(user), []byte(pwd), nil, nil, payload)
+		if err != nil {
+			return err
+		}
+		u.params = &params
+		u.user = user
 		u.pass = pwd
-		u.key = meta.Key
-		u.salt = meta.Salt
 
 		store, err := txlogs.New(pt)
 		if err != nil {
@@ -215,7 +228,7 @@ func (u *uiContext) saveBlob() error {
 		return err
 	}
 
-	data, err = crypt.Encrypt(cryptVersion, u.key, u.salt, data)
+	data, err = crypt.Encrypt(cryptVersion, u.params, data)
 	if err != nil {
 		return err
 	}

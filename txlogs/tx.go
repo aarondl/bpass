@@ -14,13 +14,6 @@ const (
 	TxDeleteKey TxKind = "delk"
 )
 
-// conflict resolutions
-const (
-	conflictNone = iota
-	conflictDelete
-	conflictRestore
-)
-
 // Tx is a transaction that changes an Entry in some way
 type Tx struct {
 	// These fields are metadata about the change
@@ -35,6 +28,13 @@ type Tx struct {
 	Key   string `msgpack:"key,omitempty" json:"key,omitempty"`
 	Value string `msgpack:"value,omitempty" json:"value,omitempty"`
 }
+
+// conflict resolutions
+const (
+	conflictNone = iota
+	conflictDelete
+	conflictRestore
+)
 
 // Conflict occurs when a set occurs after a delete (meaning one sync'd copy
 // added data to one that was deleted in the past)

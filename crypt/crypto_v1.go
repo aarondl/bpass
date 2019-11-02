@@ -231,7 +231,7 @@ func decryptV1(c config, user, passphrase, key, salt, encrypted []byte) (p Param
 	var nUsers int
 	i, err := strconv.ParseInt(string(nUserBytes), 10, 32)
 	if err != nil {
-		return p, nil, fmt.Errorf("failed to read how many users there were: %w", err)
+		return p, nil, ErrInvalidFileFormat
 	}
 
 	nUsers = int(i)

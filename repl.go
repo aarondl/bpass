@@ -15,7 +15,9 @@ directory hierarchy, you can however "cd" into an entry to omit specifying
 the entry query in key commands.
 
 Global Commands:
- passwd          - Change the file's password
+ passwd  [name]  - Change the file's password, optionally for a specific user
+ adduser <name>  - Add a user to the file (transforms the file into multi-user)
+ rmuser  <name>  - Remove a user from the file
  sync            - Synchronize the file with all sources (pull, merge, push)
  sync add <scp>  - Add a sync entry (does ssh keygen)
  exit            - Exit the repl

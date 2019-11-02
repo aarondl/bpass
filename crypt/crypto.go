@@ -15,11 +15,10 @@ import (
 
 // Error returns from decoding
 var (
-	ErrWrongPassphrase = errors.New("incorrect passphrase")
-	ErrInvalidMagic    = errors.New("invalid magic string")
-	ErrNeedUser        = errors.New("need user")
-	ErrUnknownUser     = errors.New("unknown user")
-	ErrInvalidVersion  = errors.New("invalid version")
+	ErrWrongPassphrase   = errors.New("incorrect passphrase")
+	ErrNeedUser          = errors.New("need user")
+	ErrUnknownUser       = errors.New("unknown user")
+	ErrInvalidFileFormat = errors.New("file format invalid")
 )
 
 // Error returns from encoding
@@ -143,13 +142,14 @@ func Encrypt(version int, p *Params, plaintext []byte) (encrypted []byte, err er
 	return c.encrypt(c, p, plaintext)
 }
 
-// Decrypt data, requires the full input (all headers) returned from Encrypt
-// It returns some parameters that can be used to encrypt data with.
+// Decrypt data, requires the full payload returned from Encrypt
+// It returns parameters that can be used to encrypt data with.
 //
-// If a key contains keys that can be used to decrypt without deriving
-// a key from passphrase they will be used instead. If decryption fails
-// and no passphrase has been provided to derive with, ErrWrongPassphrase
-// will be returned.
+// If key and salt are non-nil it will attempt to use these to decrypt the
+// payload without deriving a key from passphrase, this is much faster.
+// However if the decrypted payload does not have the same salt, the key
+// provided is considered invalid and the passphrase will be used to
+// derive with, if passphrase is missing ErrWrongPassphrase will be returned.
 //
 // If user is nil but the file is a multi-user file then ErrNeedUser
 // will be returned. If the user was specified but was not found in the file
@@ -182,6 +182,26 @@ func Decrypt(user, passphrase, key, salt, encrypted []byte) (version int, p Para
 	// Tag the params with the version we found for later
 	p.version = version
 	return version, p, pt, nil
+}
+
+// IsMultiUser checks if a file is multi user. This check is not necessary
+// but it avoids having to call Decrypt with a valid passphrase from a user
+// before they are prompted to enter their username. In duplicates some of
+// decryption code in order to be correct, but it is inexpensive.
+//
+// It will potentially return ErrInvalidFileFormat
+func IsMultiUser(encrypted []byte) (ok bool, err error) {
+	if _, err = verifyMagic(encrypted); err != nil {
+		return false, err
+	}
+
+	nUsersStr := string(encrypted[magicLen-4 : magicLen])
+	i, err := strconv.ParseInt(nUsersStr, 10, 32)
+	if err != nil {
+		return false, ErrInvalidFileFormat
+	}
+
+	return i != 0, nil
 }
 
 // DeriveKey from a passphrase. It returns both the key that was derived and
@@ -227,12 +247,12 @@ func verifyMagic(in []byte) (version int, err error) {
 	versionString := in[:magicLen/4]
 
 	if !bytes.Equal([]byte(magicStr), magicString) {
-		return 0, ErrInvalidMagic
+		return 0, ErrInvalidFileFormat
 	}
 
 	v, err := strconv.ParseInt(string(versionString), 10, 32)
 	if err != nil {
-		return 0, ErrInvalidVersion
+		return 0, ErrInvalidFileFormat
 	}
 
 	version = int(v)

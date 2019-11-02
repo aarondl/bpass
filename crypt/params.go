@@ -53,6 +53,11 @@ type Params struct {
 	Master []byte
 }
 
+// IsMultiUser checks to see if the encryption parameters are multi-user
+func (p *Params) IsMultiUser() bool {
+	return p.NUsers != 0
+}
+
 // SetSingleUser sets up the params to be a single user encryption scheme
 // using the key and salt (usually created by DeriveKey)
 func (p *Params) SetSingleUser(key, salt []byte) {

@@ -50,10 +50,12 @@ func (u *uiContext) passwd() error {
 		return nil
 	}
 
-	u.key, u.salt, err = crypt.DeriveKey(cryptVersion, []byte(initial))
+	key, salt, err := crypt.DeriveKey(cryptVersion, []byte(initial))
 	if err != nil {
 		return err
 	}
+
+	u.params.Rekey(key, salt)
 
 	infoColor.Println("Passphrase updated, file will be re-encrypted with it on exit")
 	return nil
