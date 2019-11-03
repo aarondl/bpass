@@ -209,6 +209,190 @@ func TestParamsRekeyAllMulti(t *testing.T) {
 	}
 }
 
+func TestParamsDiff(t *testing.T) {
+	t.Parallel()
+
+	t.Run("SingleNone", func(t *testing.T) {
+		t.Parallel()
+
+		var p, other Params
+		p.SetSingleUser(testKey, testSalt)
+		other.SetSingleUser(testKey, testSalt)
+
+		if p.Diff(other) != nil {
+			t.Error("should be no differences")
+		}
+	})
+	t.Run("SingleRekeySelf", func(t *testing.T) {
+		t.Parallel()
+
+		var p, other Params
+		p.SetSingleUser(testKey, testSalt)
+		other.SetSingleUser(testKey, []byte{10})
+
+		diffs := p.Diff(other)
+		if len(diffs) != 1 {
+			t.Error("should be 1 diff")
+		}
+		if diffs[0].Kind != ParamDiffRekeySelf {
+			t.Error("should have been a self rekey")
+		}
+	})
+	t.Run("MultiToSingle", func(t *testing.T) {
+		t.Parallel()
+
+		var p, other Params
+		testMust(p.AddUser("user", testKey, testSalt))
+		other.SetSingleUser(testKey, testSalt)
+
+		diffs := p.Diff(other)
+		if len(diffs) != 1 {
+			t.Error("should be 1 diff")
+		}
+		if diffs[0].Kind != ParamDiffSingleFile {
+			t.Error("diff 0 should have been a self rekey")
+		}
+	})
+	t.Run("SingleToMulti", func(t *testing.T) {
+		t.Parallel()
+
+		var p, other Params
+		p.SetSingleUser(testKey, testSalt)
+		testMust(other.AddUser("user", testKey, testSalt))
+
+		diffs := p.Diff(other)
+		if len(diffs) != 2 {
+			t.Error("should be 2 diffs, got:", len(diffs))
+		}
+		if diffs[0].Kind != ParamDiffMultiFile {
+			t.Error("diff 0 should have been a multi file change")
+		}
+		if diffs[1].Kind != ParamDiffAddUser {
+			t.Error("diff 1 should have been an add user")
+		}
+		if !bytes.Equal(diffs[1].SHA, other.Users[0]) {
+			t.Error("diff 1 should have pointed to the correct user")
+		}
+	})
+	t.Run("AddsRemoves", func(t *testing.T) {
+		t.Parallel()
+
+		var p, other Params
+		testMust(p.AddUser("user1", testKey, testSalt))
+		testMust(p.AddUser("user2", testKey, testSalt))
+		testMust(other.AddUser("user1", testKey, testSalt))
+		testMust(other.AddUser("user3", testKey, testSalt))
+
+		diffs := p.Diff(other)
+		if len(diffs) != 2 {
+			t.Error("should be 4 diffs, got:", len(diffs))
+		}
+
+		if diffs[0].Kind != ParamDiffAddUser {
+			t.Error("diff 0 should have been an add user")
+		}
+		if diffs[0].Index != 1 {
+			t.Error("index was wrong:", diffs[0].Index)
+		}
+		if !bytes.Equal(diffs[0].SHA, other.Users[1]) {
+			t.Error("the sha should have been the second user in the list")
+		}
+		if diffs[1].Kind != ParamDiffDelUser {
+			t.Error("diff 1 should have been an del user")
+		}
+		if diffs[1].Index != 1 {
+			t.Error("index was wrong:", diffs[1].Index)
+		}
+		if !bytes.Equal(diffs[1].SHA, p.Users[1]) {
+			t.Error("the sha should have been the second user in the list")
+		}
+	})
+	t.Run("RekeysMaster", func(t *testing.T) {
+		t.Parallel()
+
+		var p, other Params
+		testMust(p.AddUser("user1", testKey, testSalt))
+		testMust(p.AddUser("user2", testKey, testSalt))
+		testMust(p.AddUser("user3", testKey, testSalt))
+		testMust(other.AddUser("user1", testKey, testSalt))
+		testMust(other.AddUser("user2", testKey, testSalt))
+		testMust(other.AddUser("user3", testKey, testSalt))
+
+		// 0 and 1 have been rekeyed, 2 remains the same
+		p.MKeys[0] = []byte{1}
+		p.MKeys[1] = []byte{2}
+		p.MKeys[2] = []byte{3}
+		other.MKeys[0] = []byte{1 + 1}
+		other.MKeys[1] = []byte{2 + 2}
+		other.MKeys[2] = []byte{3}
+
+		diffs := p.Diff(other)
+		if len(diffs) != 2 {
+			t.Error("should be 2 diffs, got:", len(diffs))
+		}
+
+		// First diff should be a rekey of ourselves (p/other.User == 0)
+		if diffs[0].Kind != ParamDiffRekeySelf {
+			t.Error("kind of diff should be rekey self")
+		}
+		if diffs[0].Index != 0 {
+			t.Error("index was wrong:", diffs[0].Index)
+		}
+		if !bytes.Equal(diffs[0].SHA, p.Users[0]) {
+			t.Error("the sha should have been the first user in the list")
+		}
+
+		// Second diff should be a rekey of some other guy
+		if diffs[1].Kind != ParamDiffRekeyUser {
+			t.Error("kind of diff should be rekey user")
+		}
+		if diffs[1].Index != 1 {
+			t.Error("index was wrong:", diffs[1].Index)
+		}
+		if !bytes.Equal(diffs[1].SHA, p.Users[1]) {
+			t.Error("the sha should have been the second user in the list")
+		}
+	})
+	t.Run("RekeysSalt", func(t *testing.T) {
+		t.Parallel()
+
+		var p, other Params
+		testMust(p.AddUser("user1", testKey, []byte{1}))
+		testMust(p.AddUser("user2", testKey, []byte{2}))
+		testMust(p.AddUser("user3", testKey, []byte{3}))
+		testMust(other.AddUser("user1", testKey, []byte{1 + 1}))
+		testMust(other.AddUser("user2", testKey, []byte{2 + 2}))
+		testMust(other.AddUser("user3", testKey, []byte{3}))
+
+		diffs := p.Diff(other)
+		if len(diffs) != 2 {
+			t.Error("should be 2 diffs, got:", len(diffs))
+		}
+
+		// First diff should be a rekey of ourselves (p/other.User == 0)
+		if diffs[0].Kind != ParamDiffRekeySelf {
+			t.Error("kind of diff should be rekey self")
+		}
+		if diffs[0].Index != 0 {
+			t.Error("index was wrong:", diffs[0].Index)
+		}
+		if !bytes.Equal(diffs[0].SHA, p.Users[0]) {
+			t.Error("the sha should have been the first user in the list")
+		}
+
+		// Second diff should be a rekey of some other guy
+		if diffs[1].Kind != ParamDiffRekeyUser {
+			t.Error("kind of diff should be rekey user")
+		}
+		if diffs[1].Index != 1 {
+			t.Error("index was wrong:", diffs[1].Index)
+		}
+		if !bytes.Equal(diffs[1].SHA, p.Users[1]) {
+			t.Error("the sha should have been the second user in the list")
+		}
+	})
+}
+
 func testMust(err error) {
 	if err != nil {
 		panic(err)

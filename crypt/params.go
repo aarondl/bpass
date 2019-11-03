@@ -157,6 +157,14 @@ func (p *Params) RemoveUser(username string) error {
 	return nil
 }
 
+// UserKeys returns the key and salt for the user that decrypted the file.
+func (p *Params) UserKeys() (key, salt []byte) {
+	if p.NUsers == 0 {
+		return p.Keys[0], p.Salts[0]
+	}
+	return p.Keys[p.User], p.Salts[p.User]
+}
+
 // Rekey rekeys the user who opened the file
 func (p *Params) Rekey(key, salt []byte) {
 	p.rekeyIndex(key, salt, p.User)
@@ -334,4 +342,164 @@ func (p Params) validate(c config) error {
 	}
 
 	return nil
+}
+
+// Different ways two sets of parameters can differ.
+const (
+	// ParamDiffAddedUser has a sha & index in other
+	ParamDiffAddUser = iota
+	// ParamDiffDelUser has a sha & index in p
+	ParamDiffDelUser
+	// ParamDiffDelSelf has a sha & index in p
+	ParamDiffDelSelf
+	// ParamDiffRekeyUser has a sha & index in p
+	ParamDiffRekeyUser
+	// ParamDiffRekeySelf has a sha & index in p
+	ParamDiffRekeySelf
+
+	// ParamDiffMultiFile appears when p is single and other is multi
+	ParamDiffMultiFile
+	// ParamDiffSingleFile appears when p is multi and other is single
+	ParamDiffSingleFile
+)
+
+// ParamDiff is a difference between two crypt parameter sets
+type ParamDiff struct {
+	Kind  int
+	Index int
+	SHA   []byte
+}
+
+func (p ParamDiff) String() string {
+	return fmt.Sprintf("%d %d %x", p.Kind, p.Index, p.SHA)
+}
+
+// Diff compares p to other producing a list of changes. The changes are
+// from the perspective of what you would need to do to p to arrive at other.
+func (p Params) Diff(other Params) (diffs []ParamDiff) {
+	pIsMulti := p.NUsers != 0
+	otherIsMulti := other.NUsers != 0
+
+	if !pIsMulti && !otherIsMulti {
+		if bytes.Equal(p.Salts[0], other.Salts[0]) {
+			// Single-user file with same salt means there's no
+			// diffs to be found.
+			return nil
+		}
+
+		return []ParamDiff{
+			{Kind: ParamDiffRekeySelf},
+		}
+	}
+
+	// Find changes between file types
+	if !pIsMulti && otherIsMulti {
+		diffs = append(diffs, ParamDiff{Kind: ParamDiffMultiFile})
+	} else if pIsMulti && !otherIsMulti {
+		// In this case, none of the remaining checks can't really apply
+		// given that a multi -> single is somewhat nuclear, and by the time
+		// we know this we've already decrypted the file which means our
+		// passphrase/salt is unchanged and there's no reason to diff further.
+		diffs = append(diffs, ParamDiff{Kind: ParamDiffSingleFile})
+		return diffs
+	}
+
+	// Find additions
+Adds:
+	for i, theirUser := range other.Users {
+		for _, ourUser := range p.Users {
+			if bytes.Equal(theirUser, ourUser) {
+				continue Adds
+			}
+		}
+
+		// We don't have a user they do, so we would
+		// need to add the user.
+		diffs = append(diffs, ParamDiff{
+			Kind:  ParamDiffAddUser,
+			Index: i,
+			SHA:   theirUser,
+		})
+	}
+
+	// Find removals
+Removes:
+	for i, ourUser := range p.Users {
+		for _, theirUser := range other.Users {
+			if bytes.Equal(theirUser, ourUser) {
+				continue Removes
+			}
+		}
+
+		// They don't have a user we do, so we would need to remove that
+		// user.
+		kind := ParamDiffDelUser
+		if i == p.User && otherIsMulti {
+			kind = ParamDiffDelSelf
+		}
+		diffs = append(diffs, ParamDiff{
+			Kind:  kind,
+			Index: i,
+			SHA:   ourUser,
+		})
+	}
+
+	// Special case for rekeyself, note that if is !otherIsMulti
+	// is true then we know from checks above that pIsMulti and all we care
+	// about is checking if we were rekeyed, nothing else matters past this
+	if !otherIsMulti {
+		if !bytes.Equal(p.Salts[p.User], other.Salts[0]) {
+			diffs = append(diffs, ParamDiff{
+				Kind:  ParamDiffRekeySelf,
+				Index: p.User,
+				SHA:   p.Users[p.User],
+			})
+		}
+		return diffs
+	}
+
+	// Past this point it's true that pIsMulti && otherIsMulti
+
+	// Find rekeys
+UserRekeys:
+	for i, ourUser := range p.Users {
+		for j, theirUser := range other.Users {
+			if !bytes.Equal(ourUser, theirUser) {
+				continue
+			}
+
+			// if master != master && salt != salt =  rekey
+			// if master != master && salt == salt -> password change
+			// either way master blobs changing are what matters
+			// it's possible that master blobs are nil if we recently
+			// added a user in this session in which case we can only test salts
+			// which cannot be nil
+
+			// Pay close attention to the parens here
+			hasBeenRekeyed :=
+				(len(p.MKeys[i]) != 0 && len(other.MKeys[j]) != 0) &&
+					!bytes.Equal(p.MKeys[i], other.MKeys[j])
+
+			hasBeenRekeyed = hasBeenRekeyed ||
+				!bytes.Equal(p.Salts[i], other.Salts[j])
+
+			if !hasBeenRekeyed {
+				continue UserRekeys
+			}
+
+			kind := ParamDiffRekeyUser
+			if i == p.User {
+				kind = ParamDiffRekeySelf
+			}
+			diffs = append(diffs, ParamDiff{
+				Kind:  kind,
+				Index: i,
+				SHA:   p.Users[i],
+			})
+
+			break
+		}
+	}
+
+	return diffs
 }
