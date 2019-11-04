@@ -94,7 +94,10 @@ func Password(prompt string) (password string, err error) {
 		fmt.Sprintf("SETTITLE %s\n", "Bpass password entry"),
 		fmt.Sprintf("SETDESC %s\n", prompt),
 		fmt.Sprintf("OPTION ttytype %s\n", os.Getenv("TERM")),
-		fmt.Sprintf("OPTION display %s\n", os.Getenv("DISPLAY")),
+		fmt.Sprintf("OPTION lc-ctype %s\n", "UTF-8"),
+	}
+	if display := os.Getenv("DISPLAY"); len(display) != 0 {
+		setup = append(setup, fmt.Sprintf("OPTION display %s\n", display))
 	}
 
 	for _, s := range setup {
