@@ -34,7 +34,7 @@ var (
 	hideColor   = color.Mix(color.FgBlue, color.BgBlue)
 )
 
-func (u *uiContext) passwd() error {
+func (u *uiContext) passwd(user string) error {
 	initial, err := u.promptPassword(promptColor.Sprint("passphrase: "))
 	if err != nil {
 		return err
@@ -55,9 +55,106 @@ func (u *uiContext) passwd() error {
 		return err
 	}
 
+	if len(user) == 0 {
+		u.params.Rekey(key, salt)
+	} else {
+		if err := u.params.RekeyUser(user, key, salt); err == crypt.ErrUnknownUser {
+			errColor.Println("unkwon user", user)
+			return nil
+		} else if err != nil {
+			return err
+		}
+	}
+
+	infoColor.Println("Passphrase updated, bits will be re-encrypted with it on exit")
+	return nil
+}
+
+func (u *uiContext) adduser(user string) error {
+	if !u.params.IsMultiUser() {
+		// Error can't occur since there's no other users
+		_ = u.params.AddUser(user, u.params.Keys[0], u.params.Salts[0])
+		infoColor.Println("converted file into multi-user file")
+		infoColor.Printf("re-used your key for user: %s\n", user)
+		return nil
+	}
+
+	pass, err := u.getPassword()
+	if err != nil {
+		return err
+	}
+
+	key, salt, err := crypt.DeriveKey(cryptVersion, []byte(pass))
+	if err != nil {
+		return err
+	}
+
+	if err := u.params.AddUser(user, key, salt); err != nil {
+		errColor.Printf("user %q already exists\n", user)
+		return nil
+	}
+
+	infoColor.Printf("added user %s: %x\npass: %s",
+		user,
+		u.params.Users[len(u.params.Users)-1],
+		pass)
+
+	return nil
+}
+
+func (u *uiContext) rmuser(user string) error {
+	if err := u.params.RemoveUser(user); err != nil {
+		errColor.Println(err)
+		return nil
+	}
+
+	infoColor.Println("removed user:", user)
+
+	return nil
+}
+
+func (u *uiContext) rekey(user string) error {
+	key, salt, err := crypt.DeriveKey(cryptVersion, []byte(u.pass))
+	if err != nil {
+		return err
+	}
+
 	u.params.Rekey(key, salt)
 
-	infoColor.Println("Passphrase updated, file will be re-encrypted with it on exit")
+	infoColor.Println("Key updated, bits will be re-encrypted with it on exit")
+	return nil
+}
+
+var rekeyBlurb = `WARNING: This will change ALL user's passwords and print new
+ones to the screen. No one will be able to access the file with the old
+passwords again after this operation.
+`
+
+func (u *uiContext) rekeyAll() error {
+	errColor.Println(rekeyBlurb)
+	yes, err := u.getYesNo("are you sure you wish to proceed?")
+	if err != nil {
+		return err
+	}
+
+	if !yes {
+		return nil
+	}
+
+	passwords, err := u.params.RekeyAll(cryptVersion)
+	if err != nil {
+		return err
+	}
+
+	if u.params.IsMultiUser() {
+		infoColor.Println("new passwords:")
+		for i, user := range u.params.Users {
+			infoColor.Printf("  %x %s\n", user, passwords[i])
+		}
+	} else {
+		infoColor.Println("new password:", passwords[0])
+	}
+
 	return nil
 }
 
@@ -553,6 +650,11 @@ func (u *uiContext) show(search string, snapshot int) error {
 		}
 
 		blob = blobformat.Blob(entry)
+	}
+
+	if len(blob) == 0 {
+		infoColor.Println("entry is empty")
+		return nil
 	}
 
 	// Figure out the max width of the key names

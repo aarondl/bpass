@@ -103,6 +103,23 @@ func (p *Params) AddUser(username string, key, salt []byte) error {
 	return nil
 }
 
+// CopyUser copies the parameters of the user at index of other into p.
+// Can return an error if the user name has already been used.
+func (p *Params) CopyUser(index int, other Params) error {
+	for _, u := range p.Users {
+		if bytes.Equal(u, other.Users[index]) {
+			return errors.New("user already added")
+		}
+	}
+
+	p.Users = append(p.Users, other.Users[index])
+	p.Salts = append(p.Salts, other.Salts[index])
+	p.IVs = append(p.IVs, other.IVs[index])
+	p.MKeys = append(p.MKeys, other.MKeys[index])
+	p.NUsers++
+	return nil
+}
+
 // RemoveUser from the parameters.
 //
 // Returns ErrUnknownUser if user is not found.
@@ -115,9 +132,14 @@ func (p *Params) AddUser(username string, key, salt []byte) error {
 // from locking himself out, he must be removed by a different user.
 func (p *Params) RemoveUser(username string) error {
 	sum := sha256.Sum256([]byte(username))
+	return p.RemoveUserHash(sum[:])
+}
+
+// RemoveUserHash deletes a user by their hash instead of username
+func (p *Params) RemoveUserHash(user []byte) error {
 	index := -1
 	for i, u := range p.Users {
-		if bytes.Equal(sum[:], u) {
+		if bytes.Equal(user, u) {
 			index = i
 			break
 		}
@@ -334,10 +356,10 @@ func (p Params) validate(c config) error {
 		}
 	}
 
-	if p.IVM != nil && len(p.IVM) == c.blockSize {
+	if p.IVM != nil && len(p.IVM) != c.blockSize {
 		return fmt.Errorf("ivm must be %d bytes", c.blockSize)
 	}
-	if p.Master != nil && len(p.Master) == 0 {
+	if p.Master != nil && len(p.Master) != c.keySize {
 		return fmt.Errorf("master key must be %d bytes", c.keySize)
 	}
 

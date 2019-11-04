@@ -158,6 +158,10 @@ func (u *uiContext) loadBlob() error {
 			return err
 		}
 
+		if len(pwd) == 0 {
+			return errors.New("cannot create a file with an empty password")
+		}
+
 		verify, err := u.promptPassword(promptColor.Sprint("verify passphrase: "))
 		if err != nil {
 			return err

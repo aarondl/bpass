@@ -104,6 +104,24 @@ func (u *uiContext) findOne(query string) (string, error) {
 	return "", nil
 }
 
+func (u *uiContext) getYesNo(question string) (bool, error) {
+	for {
+		str, err := u.prompt(promptColor.Sprintf("%s (y/n): ", question))
+		if err != nil {
+			return false, err
+		}
+
+		switch str {
+		case "yes", "y", "YES", "Y":
+			return true, nil
+		case "no", "n", "NO", "N":
+			return false, nil
+		default:
+			errColor.Println("invalid choice, enter y/yes/n/no")
+		}
+	}
+}
+
 // getString ensures a non-empty string
 func (u *uiContext) getString(key string) (string, error) {
 	var str string

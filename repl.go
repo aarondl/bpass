@@ -14,15 +14,22 @@ familiarity and brevity however it's important to note that there's no actual
 directory hierarchy, you can however "cd" into an entry to omit specifying
 the entry query in key commands.
 
-Global Commands:
- passwd  [name]  - Change the file's password, optionally for a specific user
- adduser <name>  - Add a user to the file (transforms the file into multi-user)
- rmuser  <name>  - Remove a user from the file
- sync            - Synchronize the file with all sources (pull, merge, push)
- sync add <scp>  - Add a sync entry (does ssh keygen)
- exit            - Exit the repl
+General Commands:
+ help  - This help (how did you find this without seeing this help?)
+ exit  - Exit the repl
 
-Entry Commands:
+User/Password Commands (manage users who can access the file):
+ adduser <user> - Add user to the file (first add turns into multi-user file)
+ rmuser  <user> - Remove user from file (removing all converts into single-user)
+ passwd  [user] - Change the file's password for current user, or a specific user
+ rekey   [user] - Rekey the file (change salt) for current user, or a specific user
+ rekeyall       - Nuclear button, change all passwords & master key for all users
+
+Sync Commands (synchronize the file with remote sources):
+ sync    [name]  - Sync (Pull, Merge, Push) the file to all auto-sync accounts (or a given account)
+ addsync <kind>  - Sync entry setup wizard (help sync for more details)
+
+Entry Commands (manage entries in the file):
  add <name>      - Add a new entry
  rm  <name>      - Delete an entry
  mv  <old> <new> - Rename an entry
@@ -30,13 +37,13 @@ Entry Commands:
  cd  [query]     - "cd" into an entry, omit argument to return to root
  labels <lbl...> - List entries by labels (entry must have all given labels)
 
-Key commands (cd <query> to omit query from these commands):
+Key commands (manage keys in entries, use "cd" command to omit query from these commands):
  show <query> [snapshot]    - Show all keys for an entry (optionally at a specific snapshot)
  set  <query> <key> [value] - Set a value on an entry (omit value for multi-line or password gen)
- get  <query> <key>         - Show a specific key of an entry (lists can use index)
- cp   <query> <key>         - Copy a specific key of an entry to the clipboard (lists can use index)
+ get  <query> <key>         - Show a specific key of an entry
+ cp   <query> <key>         - Copy a specific key of an entry to the clipboard
  edit <query> <key>         - Open $EDITOR to edit an existing value
- open <query>               - Launch browser using value in url key (requires xdg-open)
+ open <query>               - Launch browser using value in url key
  rmk  <query> <key>         - Delete a key from an entry
 
  label   <query>            - Add labels in an easier way than with set
@@ -56,6 +63,21 @@ Common Arguments:
   name:   a fully qualified name
   query:  a fuzzy search (breaks on / for pseudo-folder structuring)
   index:  the number representing the item, not 0-based
+`
+
+var syncHelp = `Syncing in bpass is done via sync entries. This is just a
+normal entry with specific fields filled in. Which fields largely depends on
+which kind of syncing you're doing. The recommended way to add a sync account
+is to use addsync <kind> and follow the wizard. That said, a url of the correct
+form, and any additional required fields is all it takes to make a sync account.
+
+Types of sync: scp, file
+
+Example of values in an auto-sync scp account:
+ url: scp://myuser@localhost.com:22/folder/filename.blob
+ sync: true
+ privkey: ======= RSA PRIVATE KEY ======= ...
+ pubkey: ssh-rsa AAA...238da friend@bpass.com
 `
 
 const (
@@ -101,7 +123,38 @@ func (r *repl) run() error {
 
 		switch cmd {
 		case "passwd":
-			err = r.ctx.passwd()
+			var user string
+			if len(splits) > 0 {
+				user = splits[0]
+			}
+
+			err = r.ctx.passwd(user)
+
+		case "adduser":
+			if len(splits) == 0 {
+				errColor.Println("syntax: adduser <user>")
+				continue
+			}
+
+			err = r.ctx.adduser(splits[0])
+		case "rmuser":
+			if len(splits) == 0 {
+				errColor.Println("syntax: rmuser <user>")
+				continue
+			}
+
+			err = r.ctx.rmuser(splits[0])
+
+		case "rekey":
+			var user string
+			if len(splits) > 0 {
+				user = splits[0]
+			}
+
+			err = r.ctx.rekey(user)
+
+		case "rekeyall":
+			err = r.ctx.rekeyAll()
 
 		case "add":
 			if len(splits) < 1 {
@@ -351,17 +404,19 @@ func (r *repl) run() error {
 			err = r.ctx.show(name, snapshot)
 
 		case "sync":
-			if len(splits) == 0 {
-				err = r.ctx.sync(false, true)
-			} else {
-				kind := splits[1]
-				switch splits[0] {
-				case "add":
-					err = r.ctx.syncAdd(kind)
-				default:
-					errColor.Println("syntax: sync add <kind>")
-				}
+			var name string
+			if len(splits) > 0 {
+				name = splits[0]
 			}
+
+			err = r.ctx.sync(name, false, true)
+
+		case "addsync":
+			if len(splits) == 0 {
+				errColor.Println("syntax: syncadd <kind>")
+				continue
+			}
+			err = r.ctx.syncAdd(splits[0])
 
 		case "dump":
 			name := r.ctxEntry
@@ -379,7 +434,12 @@ func (r *repl) run() error {
 			err = r.ctx.dumpall()
 
 		case "help":
-			fmt.Println(replHelp)
+			switch {
+			case len(splits) > 0 && splits[0] == "sync":
+				fmt.Println(syncHelp)
+			default:
+				fmt.Println(replHelp)
+			}
 
 		case "exit":
 			return nil

@@ -10,49 +10,69 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
 	"github.com/aarondl/bpass/scpsync"
-	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/txlogs"
 
 	"golang.org/x/crypto/ssh"
 )
 
 const (
-	syncSCP = "scp"
+	syncSCP   = "scp"
+	syncLocal = "file"
 )
 
 var (
 	errNotFound = errors.New("not found")
 )
 
-func (u *uiContext) sync(auto, push bool) error {
+func (u *uiContext) sync(name string, auto, push bool) error {
 	err := u.store.UpdateSnapshot()
 	if err != nil {
 		return err
 	}
 
+	var syncs []string
+	if len(name) != 0 {
+		uuid, _, err := u.store.Find(name)
+		if err != nil {
+			return err
+		}
+
+		if len(uuid) == 0 {
+			errColor.Printf("could not find entry with name: %q\n", name)
+			return nil
+		}
+
+		syncs = []string{uuid}
+	} else {
+		syncs, err = collectSyncs(u.store)
+		if err != nil {
+			return err
+		}
+	}
+
 	// From here on we need to avoid updating the store snapshot until we're
 	// done syncing all the accounts, otherwise we run the risk of downloading
 	// and running a new sync partway through and that's unexpected behavior
-	syncs, err := u.collectSyncs()
-	if err != nil {
-		return err
-	}
 
 	// From this point on we don't worry about key's not being present for
 	// the most part since collectSyncs should only return valid things
 	hosts := make(map[string]string)
 	logs := make([][]txlogs.Tx, 0, len(syncs))
-	for _, uuid := range syncs {
+	cryptParams := make(map[string]crypt.Params)
+	for i, uuid := range syncs {
 		entry := u.store.Snapshot[uuid]
 		name, _ := entry[blobformat.KeyName]
 
@@ -68,23 +88,32 @@ func (u *uiContext) sync(auto, push bool) error {
 		if err != nil {
 			if err != errNotFound {
 				errColor.Printf("error pulling %q: %v\n", name, err)
+				syncs[i] = ""
 			}
 			continue
 		}
 
-		pt, err := decryptBlob(u, name, ct)
+		params, pt, err := decryptBlob(u, name, ct)
 		if err != nil {
-			errColor.Println("failed to decode %q: %v\n", name, err)
+			errColor.Printf("failed to decode %q: %v\n", name, err)
+			syncs[i] = ""
 			continue
 		}
 
 		log, err := txlogs.NewLog(pt)
 		if err != nil {
-			errColor.Println("failed parsing log %q: %v\n", name, err)
+			errColor.Printf("failed parsing log %q: %v\n", name, err)
+			syncs[i] = ""
 			continue
 		}
 
+		cryptParams[name] = params
 		logs = append(logs, log)
+	}
+
+	if err = mergeParams(u, cryptParams); err != nil {
+		errColor.Println("aborting sync, failed to merge users:", err)
+		return nil
 	}
 
 	out, err := mergeLogs(u, u.store.Log, logs)
@@ -114,13 +143,19 @@ func (u *uiContext) sync(auto, push bool) error {
 	if pt, err = u.store.Save(); err != nil {
 		return err
 	}
-	if ct, err = crypt.Encrypt(cryptVersion, u.key, u.salt, pt); err != nil {
+	if ct, err = crypt.Encrypt(cryptVersion, u.params, pt); err != nil {
 		return err
 	}
 
 	// Push back to other machines
 	hosts = make(map[string]string)
 	for _, uuid := range syncs {
+		if len(uuid) == 0 {
+			// This is a signal that pulling did not work so don't attempt
+			// to push here.
+			continue
+		}
+
 		entry := u.store.Snapshot[uuid]
 		name, _ := entry[blobformat.KeyName]
 
@@ -163,10 +198,10 @@ func saveHosts(store *txlogs.DB, newHosts map[string]string) error {
 // collectSyncs attempts to gather automatic sync entries and ensure that basic
 // attributes are available (name, path, synckind) to make it easier to use
 // later
-func (u *uiContext) collectSyncs() ([]string, error) {
+func collectSyncs(store blobformat.Blobs) ([]string, error) {
 	var validSyncs []string
 
-	for uuid, entry := range u.store.Snapshot {
+	for uuid, entry := range store.Snapshot {
 		sync, _ := entry[blobformat.KeySync]
 		if sync != "true" {
 			continue
@@ -209,9 +244,15 @@ func pullBlob(u *uiContext, uuid string) (ct []byte, hostentry string, err error
 
 	switch uri.Scheme {
 	case syncSCP:
-		hostentry, ct, err = u.sshPull(entry)
+		hostentry, ct, err = sshPull(u, entry)
 		if scpsync.IsNotFoundErr(err) {
 			return nil, hostentry, errNotFound
+		}
+	case syncLocal:
+		path := filepath.FromSlash(uri.Path)
+		ct, err = ioutil.ReadFile(path)
+		if os.IsNotExist(err) {
+			return nil, "", errNotFound
 		}
 	}
 
@@ -229,29 +270,39 @@ func pushBlob(u *uiContext, uuid string, payload []byte) (hostentry string, err 
 
 	switch uri.Scheme {
 	case syncSCP:
-		hostentry, err = u.sshPush(entry, payload)
+		hostentry, err = sshPush(u, entry, payload)
+	case syncLocal:
+		path := filepath.FromSlash(uri.Path)
+		err = ioutil.WriteFile(path, payload, 0600)
 	}
 
 	return hostentry, err
 }
 
-func decryptBlob(u *uiContext, name string, ct []byte) (pt []byte, err error) {
+func decryptBlob(u *uiContext, name string, ct []byte) (params crypt.Params, pt []byte, err error) {
 	pass := u.pass
+	user := u.user
+	key, salt := u.params.UserKeys()
 	for {
 		// Decrypt payload with our loaded key
-		_, pt, err = crypt.Decrypt([]byte(pass), ct)
+		_, params, pt, err = crypt.Decrypt([]byte(user), []byte(pass), key, salt, ct)
 		if err == nil {
-			return pt, err
+			return params, pt, err
 		}
 
-		if err != crypt.ErrWrongPassphrase {
-			return nil, err
-		}
-
-		pass, err = u.prompt(promptColor.Sprintf("%s passphrase: ", name))
-
-		if err != nil || len(pass) == 0 {
-			return nil, nil
+		switch err {
+		default:
+			return params, nil, err
+		case crypt.ErrNeedUser, crypt.ErrUnknownUser:
+			user, err = u.prompt(promptColor.Sprintf("%s user: ", name))
+			if err != nil {
+				return params, nil, nil
+			}
+		case crypt.ErrWrongPassphrase:
+			pass, err = u.prompt(promptColor.Sprintf("%s passphrase: ", name))
+			if err != nil || len(pass) == 0 {
+				return params, nil, nil
+			}
 		}
 	}
 }
@@ -312,7 +363,152 @@ func mergeLogs(u *uiContext, in []txlogs.Tx, toMerge [][]txlogs.Tx) ([]txlogs.Tx
 	return c, nil
 }
 
-func (u *uiContext) sshPull(entry txlogs.Entry) (hostentry string, ct []byte, err error) {
+var disclaimer = `WARNING: There are user differences with the local copy.
+Any changes accepted from a remote will immediately be applied to the local copy
+and on push to will overwrite all remotes completely. Meaning the updated
+local copy will completely and wholly annihilate all remotes.`
+
+func mergeParams(u *uiContext, allParams map[string]crypt.Params) error {
+	saidDisclaimer := false
+
+LoopSources:
+	for name, other := range allParams {
+		diffs := u.params.Diff(other)
+
+		if len(diffs) == 0 {
+			continue
+		}
+
+		if !saidDisclaimer {
+			saidDisclaimer = true
+			errColor.Println(disclaimer)
+		}
+
+		for _, d := range diffs {
+			switch d.Kind {
+			case crypt.ParamDiffAddUser:
+				// Do check for local delete
+				// If we know we've deleted it, don't do anything
+
+				infoColor.Printf("%q has an extra user: %x\n", name, d.SHA)
+				yes, err := u.getYesNo("do you wish to add this user locally?")
+				if err != nil {
+					return err
+				}
+
+				if yes {
+					if err := u.params.CopyUser(d.Index, other); err != nil {
+						return err
+					}
+				}
+			case crypt.ParamDiffDelUser:
+				infoColor.Printf("%q is missing user: %x\n", name, d.SHA)
+				yes, err := u.getYesNo("do you wish to remove this user locally?")
+				if err != nil {
+					return err
+				}
+
+				if yes {
+					if err = u.params.RemoveUserHash(d.SHA); err != nil {
+						return err
+					}
+				}
+			case crypt.ParamDiffDelSelf:
+				infoColor.Printf("%q has removed YOU\n", name)
+				infoColor.Println("how did you decrypt this? Bailing")
+				return errors.New("how is this even possible?")
+			case crypt.ParamDiffRekeyUser:
+				infoColor.Printf("%q has rekeyed: %x\n", name, d.SHA)
+				yes, err := u.getYesNo("do you wish to accept this rekey?")
+				if err != nil {
+					return err
+				}
+
+				if yes {
+					// Update the salt, iv, mkey for that user
+					index := -1
+					for i, u := range other.Users {
+						if bytes.Equal(u, d.SHA) {
+							index = i
+							break
+						}
+					}
+
+					if index < 0 {
+						return errors.New("failed to find user specified in diff")
+					}
+
+					u.params.Salts[d.Index] = other.Salts[index]
+					u.params.IVs[d.Index] = other.IVs[index]
+					u.params.MKeys[d.Index] = other.MKeys[index]
+				}
+			case crypt.ParamDiffRekeySelf:
+				infoColor.Printf("%q has rekeyed YOU\n", name)
+				yes, err := u.getYesNo("do you wish to accept this rekey?")
+				if err != nil {
+					return err
+				}
+
+				if yes {
+					// Update the salt, iv, mkey for that us
+					index := -1
+					for i, u := range other.Users {
+						if bytes.Equal(u, d.SHA) {
+							index = i
+							break
+						}
+					}
+
+					if index < 0 {
+						return errors.New("failed to find user specified in diff")
+					}
+
+					u.params.Salts[u.params.User] = other.Salts[index]
+					u.params.IVs[u.params.User] = other.IVs[index]
+					u.params.MKeys[u.params.User] = other.MKeys[index]
+				}
+			case crypt.ParamDiffMultiFile:
+				infoColor.Printf("%q has changed into a multi-user file\n", name)
+				yes, err := u.getYesNo("do you wish to accept this change?")
+				if err != nil {
+					return err
+				}
+
+				if yes {
+					// We were able to decrypt this file, so the user both
+					// knows his username and password for the file and he's
+					// clearly in it. So we can safely just overwrite our
+					// current params with the other ones.
+					*u.params = other
+				}
+				// Whether or not this is added or rejected, we basically don't
+				// want any changes from this source is it can only really be
+				// add users.
+				continue LoopSources
+			case crypt.ParamDiffSingleFile:
+				infoColor.Printf("%q has changed into a single-user file\n", name)
+				yes, err := u.getYesNo("do you wish to accept this change?")
+				if err != nil {
+					return err
+				}
+
+				if yes {
+					// We were able to decrypt this file so the user is the
+					// last one remaining, we can simply overwrite our params
+					// with the others
+					*u.params = other
+				}
+				// Other diff chunks don't matter because this is a nuclear
+				// option
+				continue LoopSources
+			}
+		}
+	}
+
+	return nil
+}
+
+func sshPull(u *uiContext, entry txlogs.Entry) (hostentry string, ct []byte, err error) {
 	address, path, config, err := sshConfig(entry)
 	if err != nil {
 		return "", nil, err
@@ -330,7 +526,7 @@ func (u *uiContext) sshPull(entry txlogs.Entry) (hostentry string, ct []byte, er
 	return asker.newHost, payload, nil
 }
 
-func (u *uiContext) sshPush(entry txlogs.Entry, ct []byte) (hostentry string, err error) {
+func sshPush(u *uiContext, entry txlogs.Entry, ct []byte) (hostentry string, err error) {
 	address, path, config, err := sshConfig(entry)
 	if err != nil {
 		return "", err
