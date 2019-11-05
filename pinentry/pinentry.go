@@ -51,7 +51,7 @@ func Password(prompt string) (password string, err error) {
 		return "", ErrNotFound
 	}
 
-	cmd := exec.Command(program)
+	cmd := exec.Command(program, "--ttyname", "/dev/tty")
 	cmd.Stderr = os.Stderr
 
 	var in io.WriteCloser
@@ -93,8 +93,10 @@ func Password(prompt string) (password string, err error) {
 	setup := []string{
 		fmt.Sprintf("SETTITLE %s\n", "Bpass password entry"),
 		fmt.Sprintf("SETDESC %s\n", prompt),
-		fmt.Sprintf("OPTION ttytype %s\n", os.Getenv("TERM")),
 		fmt.Sprintf("OPTION lc-ctype %s\n", "UTF-8"),
+	}
+	if term := os.Getenv("TERM"); len(term) != 0 {
+		setup = append(setup, fmt.Sprintf("OPTION ttytype %s\n", term))
 	}
 	if display := os.Getenv("DISPLAY"); len(display) != 0 {
 		setup = append(setup, fmt.Sprintf("OPTION display %s\n", display))
