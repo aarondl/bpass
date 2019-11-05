@@ -411,6 +411,17 @@ func (u *uiContext) set(search, key, value string) error {
 			errColor.Println(err)
 			return nil
 		}
+	case blobformat.KeyURL:
+		uri, err := url.Parse(value)
+		if err != nil {
+			errColor.Println("not a valid url")
+			return nil
+		} else if uri.Scheme == "" || uri.Opaque != "" {
+			errColor.Println("url must include a scheme like https://")
+			return nil
+		}
+
+		u.store.Set(uuid, key, value)
 	default:
 		u.store.Set(uuid, key, value)
 	}
