@@ -271,15 +271,18 @@ func TestMerge(t *testing.T) {
 		t.Parallel()
 
 		logA := []Tx{
-			{Time: 1, Kind: TxAdd, UUID: "1"},
-			{Time: 3, Kind: TxSetKey, UUID: "1", Key: "a", Value: "b"},
+			{Time: 0, Kind: TxAdd, UUID: "0"},
+			{Time: 2, Kind: TxAdd, UUID: "1"},
+			{Time: 4, Kind: TxSetKey, UUID: "1", Key: "a", Value: "b"},
 		}
 		logB := []Tx{
-			{Time: 2, Kind: TxDelete, UUID: "1"},
+			{Time: 0, Kind: TxAdd, UUID: "0"},
+			{Time: 3, Kind: TxDelete, UUID: "1"},
 		}
 		logDelete := []Tx{
-			{Time: 1, Kind: TxAdd, UUID: "1"},
-			{Time: 2, Kind: TxDelete, UUID: "1"},
+			{Time: 0, Kind: TxAdd, UUID: "0"},
+			{Time: 2, Kind: TxAdd, UUID: "1"},
+			{Time: 3, Kind: TxDelete, UUID: "1"},
 		}
 
 		merged, conflicts := Merge(logA, logB, nil)
@@ -292,10 +295,13 @@ func TestMerge(t *testing.T) {
 		}
 
 		c := conflicts[0]
-		if c.DeleteTx.Time != logB[0].Time {
+		if c.Kind != ConflictKindDeleteSet {
+			t.Error("conflict kind wrong")
+		}
+		if c.Initial.Time != logB[1].Time {
 			t.Error("delete tx wrong")
 		}
-		if c.SetTx.Time != logA[1].Time {
+		if c.Conflict.Time != logA[2].Time {
 			t.Error("set tx wrong")
 		}
 
@@ -305,7 +311,7 @@ func TestMerge(t *testing.T) {
 		copy(restore, conflicts)
 		copy(deletem, conflicts)
 
-		restore[0].Restore()
+		restore[0].DiscardInitial()
 		merged, conflicts = Merge(logA, logB, restore)
 		if len(conflicts) != 0 {
 			t.Errorf("conflicts should be empty: %#v", conflicts)
@@ -314,7 +320,7 @@ func TestMerge(t *testing.T) {
 			t.Errorf("merged differs: %#v", merged)
 		}
 
-		deletem[0].Delete()
+		deletem[0].DiscardConflict()
 		merged, conflicts = Merge(logA, logB, deletem)
 		if len(conflicts) != 0 {
 			t.Errorf("conflicts should be empty: %#v", conflicts)
@@ -339,6 +345,9 @@ func TestMerge(t *testing.T) {
 			{Time: 7, Kind: TxSetKey, UUID: "2", Key: "a", Value: "b"},
 		}
 		logB := []Tx{
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
+
 			{Time: 3, Kind: TxDelete, UUID: "1"},
 			{Time: 4, Kind: TxDelete, UUID: "2"},
 		}
@@ -356,16 +365,23 @@ func TestMerge(t *testing.T) {
 		if len(conflicts) != 2 {
 			t.Error("there was", len(conflicts), "conflicts")
 		}
-		if conflicts[0].DeleteTx.Time != 3 {
+		if conflicts[0].Kind != ConflictKindDeleteSet {
+			t.Error("conflict kind was wrong")
+		}
+		if conflicts[0].Initial.Time != 3 {
 			t.Error("delete id was wrong")
 		}
-		if conflicts[0].SetTx.Time != logA[2].Time {
+		if conflicts[0].Conflict.Time != logA[2].Time {
 			t.Error("set tx was wrong")
 		}
-		if conflicts[1].DeleteTx.Time != 4 {
+
+		if conflicts[1].Kind != ConflictKindDeleteSet {
+			t.Error("conflict kind was wrong")
+		}
+		if conflicts[1].Initial.Time != 4 {
 			t.Error("delete id was wrong")
 		}
-		if conflicts[1].SetTx.Time != logA[4].Time {
+		if conflicts[1].Conflict.Time != logA[4].Time {
 			t.Error("set tx was wrong")
 		}
 
@@ -376,7 +392,7 @@ func TestMerge(t *testing.T) {
 		copy(deletem, conflicts)
 
 		for i := range restore {
-			restore[i].Restore()
+			restore[i].DiscardInitial()
 		}
 		merged, conflicts = Merge(logA, logB, restore)
 		if len(conflicts) != 0 {
@@ -387,13 +403,55 @@ func TestMerge(t *testing.T) {
 		}
 
 		for i := range restore {
-			deletem[i].Delete()
+			deletem[i].DiscardConflict()
 		}
 		merged, conflicts = Merge(logA, logB, deletem)
 		if len(conflicts) != 0 {
 			t.Errorf("conflicts should be empty: %#v", conflicts)
 		}
 		if !reflect.DeepEqual(logDelete, merged) {
+			t.Errorf("merged differs: %#v", merged)
+		}
+	})
+	t.Run("ConflictsRoot", func(t *testing.T) {
+		t.Parallel()
+
+		logA := []Tx{
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+		}
+		logB := []Tx{
+			{Time: 2, Kind: TxAdd, UUID: "2"},
+		}
+		logCombined := []Tx{
+			{Time: 1, Kind: TxAdd, UUID: "1"},
+			{Time: 2, Kind: TxAdd, UUID: "2"},
+		}
+
+		merged, conflicts := Merge(logA, logB, nil)
+		if len(merged) != 0 {
+			t.Error("merged should not be returned")
+		}
+		if len(conflicts) != 1 {
+			t.Error("there was", len(conflicts), "conflicts")
+		}
+		if conflicts[0].Kind != ConflictKindRoot {
+			t.Error("conflict kind was wrong")
+		}
+		if conflicts[0].Initial.Time != 1 {
+			t.Error("delete id was wrong")
+		}
+		if conflicts[0].Conflict.Time != 2 {
+			t.Error("set tx was wrong")
+		}
+
+		for i := range conflicts {
+			conflicts[i].Force()
+		}
+		merged, conflicts = Merge(logA, logB, conflicts)
+		if len(conflicts) != 0 {
+			t.Errorf("conflicts should be empty: %#v", conflicts)
+		}
+		if !reflect.DeepEqual(merged, logCombined) {
 			t.Errorf("merged differs: %#v", merged)
 		}
 	})

@@ -29,28 +29,48 @@ type Tx struct {
 	Value string `msgpack:"value,omitempty" json:"value,omitempty"`
 }
 
+// conflict types
+const (
+	// ConflictKindDeleteSet occurs when an entry has been deleted
+	// but then an operation was performed on the deleted item.
+	ConflictKindDeleteSet = iota + 1
+	// ConflictKindRoot occurs when there is no shared history between
+	// the two histories.
+	ConflictKindRoot
+)
+
 // conflict resolutions
 const (
-	conflictNone = iota
-	conflictDelete
-	conflictRestore
+	resolveNone = iota
+	resolveDiscardInitial
+	resolveDiscardConflict
+	resolveForce
 )
 
 // Conflict occurs when a set occurs after a delete (meaning one sync'd copy
 // added data to one that was deleted in the past)
 type Conflict struct {
-	DeleteTx Tx
-	SetTx    Tx
+	Kind int
+
+	Initial  Tx
+	Conflict Tx
 
 	resolution int
 }
 
-// Delete discards the set transaction from the log
-func (c *Conflict) Delete() {
-	c.resolution = conflictDelete
+// DiscardConflict discards the transaction that conflicts with initial.
+func (c *Conflict) DiscardConflict() {
+	c.resolution = resolveDiscardConflict
 }
 
-// Restore discards the delete transaction from the log
-func (c *Conflict) Restore() {
-	c.resolution = conflictRestore
+// DiscardInitial discards the initial that created the state where the
+// conflict could occur.
+func (c *Conflict) DiscardInitial() {
+	c.resolution = resolveDiscardInitial
+}
+
+// Force mangles the file to accept the conflicting problems.
+// This only works for ConflictKindRoot.
+func (c *Conflict) Force() {
+	c.resolution = resolveForce
 }

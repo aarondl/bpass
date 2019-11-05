@@ -328,7 +328,7 @@ func (s *DB) LastUpdated(uuid string) (last int64) {
 // be returned.
 func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 	for _, r := range resolved {
-		if r.resolution == conflictNone {
+		if r.resolution == resolveNone {
 			return nil, resolved
 		}
 	}
@@ -375,12 +375,12 @@ func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 			// Before we mark ourselves as deleted, make sure we aren't
 			// part of a resolution.
 			for _, res := range resolved {
-				if res.DeleteTx.Time != c[last].Time {
+				if res.Initial.Time != c[last].Time {
 					continue
 				}
 
 				// We are part of this resolution
-				if res.resolution == conflictRestore {
+				if res.resolution == resolveDiscardInitial {
 					// We delete ourselves
 					c = c[:last]
 					return
@@ -396,9 +396,11 @@ func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 		deleteTx := c[ind]
 		// Check if its resolved
 		for _, res := range resolved {
-			if res.DeleteTx.Time == deleteTx.Time {
+			if res.Initial.Time == deleteTx.Time {
 				// Assert for the impossible, and delete ourselves off the end
-				if res.resolution != conflictDelete {
+				// This is impossible because if it was resolved in the other
+				// way it should have been handled above.
+				if res.resolution != resolveDiscardConflict {
 					panic("impossible situation")
 				}
 				c = c[:last]
@@ -408,15 +410,16 @@ func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 
 		// Make sure we haven't noted this one already first
 		for _, con := range conflicts {
-			if con.DeleteTx.Time == deleteTx.Time {
+			if con.Initial.Time == deleteTx.Time {
 				return
 			}
 		}
 
 		// Add it
 		conflicts = append(conflicts, Conflict{
-			DeleteTx: deleteTx,
-			SetTx:    c[last],
+			Kind:     ConflictKindDeleteSet,
+			Initial:  deleteTx,
+			Conflict: c[last],
 		})
 	}
 
@@ -436,6 +439,22 @@ func Merge(a, b []Tx, resolved []Conflict) (c []Tx, conflicts []Conflict) {
 			i++
 			j++
 			continue
+		}
+
+		// We've forked.
+		// If the fork happens and we have not moved either i or j
+		// that means that there is no common ancestry and this is likely a
+		// mistake to be syncing these. Create a conflict. This will always
+		// be the first conflict.
+		if i == 0 && j == 0 {
+			// Check if it's been resolved
+			if len(resolved) == 0 || resolved[0].resolution != resolveForce {
+				conflicts = append(conflicts, Conflict{
+					Kind:     ConflictKindRoot,
+					Initial:  a[i],
+					Conflict: b[j],
+				})
+			}
 		}
 
 		// Compare the txs

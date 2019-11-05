@@ -307,6 +307,12 @@ func decryptBlob(u *uiContext, name string, ct []byte) (params crypt.Params, pt 
 	}
 }
 
+var syncNoCommonAncestryWarning = `WARNING: There is no common ancestry between
+the local and the remote file. What this probably means is that the wrong
+file is in the sync location, and proceeding would mean that both files become
+merged into one instead of remaining separate.
+`
+
 func mergeLogs(u *uiContext, in []txlogs.Tx, toMerge [][]txlogs.Tx) ([]txlogs.Tx, error) {
 	if len(toMerge) == 0 {
 		return in, nil
@@ -324,37 +330,54 @@ func mergeLogs(u *uiContext, in []txlogs.Tx, toMerge [][]txlogs.Tx) ([]txlogs.Tx
 		infoColor.Println(len(conflicts), " conflicts occurred during syncing!")
 
 		for i, c := range conflicts {
-			infoColor.Printf("entry %q was deleted at: %s\nbut at %s, ",
-				c.DeleteTx.UUID,
-				time.Unix(0, c.DeleteTx.Time).Format(time.RFC3339),
-				time.Unix(0, c.SetTx.Time).Format(time.RFC3339),
-			)
 
-			switch c.SetTx.Kind {
-			case txlogs.TxSetKey:
-				infoColor.Printf("a kv set happened:\n%s = %s\n",
-					c.SetTx.Key,
-					c.SetTx.Value,
-				)
-			case txlogs.TxDeleteKey:
-				infoColor.Printf("a key delete happened for key:\n%s\n",
-					c.SetTx.Key,
-				)
-			}
+			switch c.Kind {
+			case txlogs.ConflictKindRoot:
+				errColor.Println(syncNoCommonAncestryWarning)
 
-			for {
-				line, err := u.prompt("[R]estore item? [D]elete item? (r/R/d/D): ")
+				yes, err := u.getYesNo("do you want to merge these anyway?")
 				if err != nil {
 					return nil, err
 				}
 
-				switch line {
-				case "R", "r":
-					conflicts[i].Restore()
-				case "D", "d":
-					conflicts[i].Delete()
-				default:
-					continue
+				if !yes {
+					infoColor.Println("aborting merge")
+					return nil, errors.New("sync target was a total fork")
+				}
+				conflicts[0].Force()
+			case txlogs.ConflictKindDeleteSet:
+				infoColor.Printf("entry %q was deleted at: %s\nbut at %s, ",
+					c.Initial.UUID,
+					time.Unix(0, c.Initial.Time).Format(time.RFC3339),
+					time.Unix(0, c.Conflict.Time).Format(time.RFC3339),
+				)
+
+				switch c.Initial.Kind {
+				case txlogs.TxSetKey:
+					infoColor.Printf("a set happened:\n%s = %s\n",
+						c.Conflict.Key,
+						c.Conflict.Value,
+					)
+				case txlogs.TxDeleteKey:
+					infoColor.Printf("a delete happened for key:\n%s\n",
+						c.Conflict.Key,
+					)
+				}
+
+				for {
+					line, err := u.prompt(promptColor.Sprint("[R]estore item? [D]elete item? (r/R/d/D): "))
+					if err != nil {
+						return nil, err
+					}
+
+					switch line {
+					case "R", "r":
+						conflicts[i].DiscardInitial()
+					case "D", "d":
+						conflicts[i].DiscardConflict()
+					default:
+						continue
+					}
 				}
 			}
 		}
