@@ -299,7 +299,7 @@ func decryptBlob(u *uiContext, name string, ct []byte) (params crypt.Params, pt 
 				return params, nil, nil
 			}
 		case crypt.ErrWrongPassphrase:
-			pass, err = u.prompt(promptColor.Sprintf("%s passphrase: ", name))
+			pass, err = u.promptPassword(promptColor.Sprintf("%s passphrase: ", name))
 			if err != nil || len(pass) == 0 {
 				return params, nil, nil
 			}
@@ -310,8 +310,7 @@ func decryptBlob(u *uiContext, name string, ct []byte) (params crypt.Params, pt 
 var syncNoCommonAncestryWarning = `WARNING: There is no common ancestry between
 the local and the remote file. What this probably means is that the wrong
 file is in the sync location, and proceeding would mean that both files become
-merged into one instead of remaining separate.
-`
+merged into one instead of remaining separate.`
 
 func mergeLogs(u *uiContext, in []txlogs.Tx, toMerge [][]txlogs.Tx) ([]txlogs.Tx, error) {
 	if len(toMerge) == 0 {
@@ -320,21 +319,22 @@ func mergeLogs(u *uiContext, in []txlogs.Tx, toMerge [][]txlogs.Tx) ([]txlogs.Tx
 
 	var c []txlogs.Tx
 	var conflicts []txlogs.Conflict
-	for _, log := range toMerge {
+	i := 0
+	for i < len(toMerge) {
+		log := toMerge[i]
 		c, conflicts = txlogs.Merge(in, log, conflicts)
 
 		if len(conflicts) == 0 {
-			break
+			i++
+			continue
 		}
 
-		infoColor.Println(len(conflicts), " conflicts occurred during syncing!")
+		infoColor.Println(len(conflicts), "conflicts occurred during syncing!")
 
 		for i, c := range conflicts {
-
 			switch c.Kind {
 			case txlogs.ConflictKindRoot:
 				errColor.Println(syncNoCommonAncestryWarning)
-
 				yes, err := u.getYesNo("do you want to merge these anyway?")
 				if err != nil {
 					return nil, err
@@ -344,7 +344,7 @@ func mergeLogs(u *uiContext, in []txlogs.Tx, toMerge [][]txlogs.Tx) ([]txlogs.Tx
 					infoColor.Println("aborting merge")
 					return nil, errors.New("sync target was a total fork")
 				}
-				conflicts[0].Force()
+				conflicts[i].Force()
 			case txlogs.ConflictKindDeleteSet:
 				infoColor.Printf("entry %q was deleted at: %s\nbut at %s, ",
 					c.Initial.UUID,
@@ -387,8 +387,8 @@ func mergeLogs(u *uiContext, in []txlogs.Tx, toMerge [][]txlogs.Tx) ([]txlogs.Tx
 }
 
 var disclaimer = `WARNING: There are user differences with the local copy.
-Any changes accepted from a remote will immediately be applied to the local copy
-and on push to will overwrite all remotes completely. Meaning the updated
+Any changes accepted from a remote will immediately be applied to the local
+copy and on push to will overwrite all remotes completely. Meaning the updated
 local copy will completely and wholly annihilate all remotes.`
 
 func mergeParams(u *uiContext, allParams map[string]crypt.Params) error {
@@ -410,9 +410,6 @@ LoopSources:
 		for _, d := range diffs {
 			switch d.Kind {
 			case crypt.ParamDiffAddUser:
-				// Do check for local delete
-				// If we know we've deleted it, don't do anything
-
 				infoColor.Printf("%q has an extra user: %x\n", name, d.SHA)
 				yes, err := u.getYesNo("do you wish to add this user locally?")
 				if err != nil {
@@ -438,8 +435,7 @@ LoopSources:
 				}
 			case crypt.ParamDiffDelSelf:
 				infoColor.Printf("%q has removed YOU\n", name)
-				infoColor.Println("how did you decrypt this? Bailing")
-				return errors.New("how is this even possible?")
+				return errors.New("how did you decrypt this? bailing")
 			case crypt.ParamDiffRekeyUser:
 				infoColor.Printf("%q has rekeyed: %x\n", name, d.SHA)
 				yes, err := u.getYesNo("do you wish to accept this rekey?")
@@ -472,24 +468,31 @@ LoopSources:
 					return err
 				}
 
-				if yes {
-					// Update the salt, iv, mkey for that us
-					index := -1
-					for i, u := range other.Users {
-						if bytes.Equal(u, d.SHA) {
-							index = i
-							break
-						}
-					}
-
-					if index < 0 {
-						return errors.New("failed to find user specified in diff")
-					}
-
-					u.params.Salts[u.params.User] = other.Salts[index]
-					u.params.IVs[u.params.User] = other.IVs[index]
-					u.params.MKeys[u.params.User] = other.MKeys[index]
+				if !yes {
+					continue
 				}
+
+				if !u.params.IsMultiUser() {
+					u.params.Salts[0] = other.Salts[0]
+					continue
+				}
+
+				// Update the salt, iv, mkey for that us
+				index := -1
+				for i, u := range other.Users {
+					if bytes.Equal(u, d.SHA) {
+						index = i
+						break
+					}
+				}
+
+				if index < 0 {
+					return errors.New("failed to find user specified in diff")
+				}
+
+				u.params.Salts[u.params.User] = other.Salts[index]
+				u.params.IVs[u.params.User] = other.IVs[index]
+				u.params.MKeys[u.params.User] = other.MKeys[index]
 			case crypt.ParamDiffMultiFile:
 				infoColor.Printf("%q has changed into a multi-user file\n", name)
 				yes, err := u.getYesNo("do you wish to accept this change?")

@@ -295,8 +295,8 @@ func (p Params) validate(c config) error {
 	if len(p.Salts) == 0 {
 		return errors.New("must have at least one salt")
 	}
-	for i, mkey := range p.Keys {
-		if len(mkey) != c.keySize {
+	for i, key := range p.Keys {
+		if len(key) != 0 && len(key) != c.keySize {
 			return fmt.Errorf("keys[%d] must be %d bytes", i, c.keySize)
 		}
 	}

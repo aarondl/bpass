@@ -24,6 +24,12 @@ var (
 		"pinentry-tty",
 	}
 
+	pinEntryReplace = strings.NewReplacer(
+		"%25", "%",
+		"%0D", "\r",
+		"%0A", "\n",
+	)
+
 	cachedPinEntry string
 )
 
@@ -34,6 +40,10 @@ var (
 // and no error.
 func Password(prompt string) (password string, err error) {
 	program := os.Getenv("PINENTRY")
+	if strings.EqualFold(program, "none") {
+		return "", ErrNotFound
+	}
+
 	if len(program) == 0 {
 		if len(cachedPinEntry) == 0 {
 			for _, p := range pinEntryPrograms {
@@ -129,7 +139,7 @@ func Password(prompt string) (password string, err error) {
 		return "", err
 	}
 
-	return password, nil
+	return pinEntryReplace.Replace(password), nil
 }
 
 func mustWrite(_ int, err error) {

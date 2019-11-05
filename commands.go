@@ -94,7 +94,7 @@ func (u *uiContext) adduser(user string) error {
 		return nil
 	}
 
-	infoColor.Printf("added user %s: %x\npass: %s",
+	infoColor.Printf("added user %s: %x\npass: %s\n",
 		user,
 		u.params.Users[len(u.params.Users)-1],
 		pass)
