@@ -51,9 +51,11 @@ type config struct {
 	blockSize int
 
 	// these functions must be set for the config to be able to do anything
-	encrypt encryptFn
-	decrypt decryptFn
-	keygen  keyFn
+	encrypt    encryptFn
+	encryptKey encryptMKeyFn
+	decrypt    decryptFn
+	keygen     keyFn
+	mkeygen    mkeyFn
 }
 
 type cipherAlg struct {
@@ -67,9 +69,11 @@ type cipherAlg struct {
 // separate type that needs to implement anything specific and different
 // versions/configs can easily borrow implementations from others.
 type (
-	encryptFn func(c config, p *Params, pt []byte) (encrypted []byte, err error)
-	decryptFn func(c config, user, passphrase, key, salt, encrypted []byte) (p Params, pt []byte, err error)
-	keyFn     func(c config, passphrase, salt []byte) (key []byte, err error)
+	encryptFn     func(c config, p *Params, pt []byte) (encrypted []byte, err error)
+	encryptMKeyFn func(c config, key, master []byte) (cryptedMaster, iv []byte, err error)
+	decryptFn     func(c config, user, passphrase, key, salt, encrypted []byte) (p Params, pt []byte, err error)
+	keyFn         func(c config, passphrase, salt []byte) (key []byte, err error)
+	mkeyFn        func(c config) (master, iv []byte, err error)
 )
 
 var (
@@ -83,18 +87,20 @@ var (
 
 func init() {
 	// Create all the versioned configurations
-	makeVersion(1, encryptV1, decryptV1, deriveKeyV1, 32, "AES", "Camellia", "CAST5")
+	makeVersion(1, encryptV1, encryptMasterKeyV1, decryptV1, deriveKeyV1, newMasterKeyV1, 32, "AES", "Camellia", "CAST5")
 }
 
 // makeVersion is a helper for calculating block and key size from the
 // constant list of algorithms and putting the entry in versions
-func makeVersion(version int, e encryptFn, d decryptFn, k keyFn, saltSize int, algs ...string) config {
+func makeVersion(version int, e encryptFn, ek encryptMKeyFn, d decryptFn, k keyFn, mk mkeyFn, saltSize int, algs ...string) config {
 	c := config{
-		version:  version,
-		saltSize: saltSize,
-		encrypt:  e,
-		decrypt:  d,
-		keygen:   k,
+		version:    version,
+		saltSize:   saltSize,
+		encrypt:    e,
+		encryptKey: ek,
+		decrypt:    d,
+		keygen:     k,
+		mkeygen:    mk,
 	}
 
 	for _, a := range algs {
@@ -140,6 +146,28 @@ func Encrypt(version int, p *Params, plaintext []byte) (encrypted []byte, err er
 	}
 
 	return c.encrypt(c, p, plaintext)
+}
+
+// EncryptMasterKey encrypts a master key for a user at a specific version.
+// It returns the encrypted master key and a new iv that was used to encrypt
+// it with.
+func EncryptMasterKey(version int, userKey, master []byte) (cryptedMaster, iv []byte, err error) {
+	c, err := getVersion(version)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return c.encryptKey(c, userKey, master)
+}
+
+// NewMasterKey creates a new master key for multi-user purposes.
+func NewMasterKey(version int) (master, iv []byte, err error) {
+	c, err := getVersion(version)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return c.mkeygen(c)
 }
 
 // Decrypt data, requires the full payload returned from Encrypt

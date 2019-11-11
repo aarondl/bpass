@@ -267,8 +267,21 @@ func (u *uiContext) getPassword() (string, error) {
 		case choice == "y":
 			return password, nil
 		case choice == "m":
-			b, err := u.promptPassword(promptColor.Sprint("enter new password: "))
-			return string(b), err
+			initial, err := u.promptPassword(promptColor.Sprint("enter new password: "))
+			if err != nil {
+				return "", err
+			}
+
+			verify, err := u.promptPassword(promptColor.Sprint("verify password: "))
+			if err != nil {
+				return "", err
+			}
+
+			if initial != verify {
+				errColor.Println("passwords did not match")
+				continue
+			}
+			return initial, err
 		case choice == "?":
 			help()
 		case splits[0] == "u":

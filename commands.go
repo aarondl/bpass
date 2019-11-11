@@ -1,10 +1,19 @@
 package main
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -18,7 +27,7 @@ import (
 	"github.com/aarondl/bpass/blobformat"
 	"github.com/aarondl/bpass/crypt"
 	"github.com/aarondl/bpass/osutil"
-	"github.com/aarondl/bpass/txlogs"
+	"golang.org/x/crypto/ssh"
 
 	"github.com/aarondl/color"
 	"github.com/atotto/clipboard"
@@ -34,54 +43,20 @@ var (
 	hideColor   = color.Mix(color.FgBlue, color.BgBlue)
 )
 
+const (
+	syncSCP   = "scp"
+	syncLocal = "file"
+)
+
 func (u *uiContext) passwd(user string) error {
-	initial, err := u.promptPassword(promptColor.Sprint("passphrase: "))
-	if err != nil {
-		return err
-	}
-
-	verify, err := u.promptPassword(promptColor.Sprint("verify passphrase: "))
-	if err != nil {
-		return err
-	}
-
-	if initial != verify {
-		errColor.Println("passphrase did not match")
-		return nil
-	}
-
-	key, salt, err := crypt.DeriveKey(cryptVersion, []byte(initial))
-	if err != nil {
-		return err
-	}
-
-	if len(user) == 0 {
-		u.params.Rekey(key, salt)
-	} else {
-		if err := u.params.RekeyUser(user, key, salt); err == crypt.ErrUnknownUser {
-			errColor.Println("unkwon user", user)
-			return nil
-		} else if err != nil {
-			return err
-		}
-	}
-
-	infoColor.Println("Passphrase updated, bits will be re-encrypted with it on exit")
-	return nil
-}
-
-func (u *uiContext) adduser(user string) error {
-	if !u.params.IsMultiUser() {
-		// Error can't occur since there's no other users
-		_ = u.params.AddUser(user, u.params.Keys[0], u.params.Salts[0])
-		infoColor.Println("converted file into multi-user file")
-		infoColor.Printf("re-used your key for user: %s\n", user)
-		return nil
-	}
-
 	pass, err := u.getPassword()
 	if err != nil {
 		return err
+	}
+
+	if len(pass) == 0 {
+		errColor.Println("refusing to use empty password")
+		return nil
 	}
 
 	key, salt, err := crypt.DeriveKey(cryptVersion, []byte(pass))
@@ -89,49 +64,154 @@ func (u *uiContext) adduser(user string) error {
 		return err
 	}
 
-	if err := u.params.AddUser(user, key, salt); err != nil {
-		errColor.Printf("user %q already exists\n", user)
-		return nil
+	// Update our "fast-path" credentials if we're re-doing the current user
+	if len(u.user) == 0 || u.user == user {
+		u.pass = pass
+		u.key = key
+		u.salt = salt
 	}
 
-	infoColor.Printf("added user %s: %x\npass: %s\n",
-		user,
-		u.params.Users[len(u.params.Users)-1],
-		pass)
+	// We have to update the user entry if it's a multi-user file
+	if len(u.master) != 0 {
+		uuid, _, err := u.store.MustFindUser(u.user)
+		if err != nil {
+			return err
+		}
 
+		mkey, iv, err := crypt.EncryptMasterKey(cryptVersion, key, u.master)
+		if err != nil {
+			return err
+		}
+
+		u.store.DB.Set(uuid, blobformat.KeySalt, hex.EncodeToString(salt))
+		u.store.DB.Set(uuid, blobformat.KeyIV, hex.EncodeToString(iv))
+		u.store.DB.Set(uuid, blobformat.KeyMKey, hex.EncodeToString(mkey))
+	}
+
+	infoColor.Println("passphrase updated, bits will be re-encrypted with it on exit")
 	return nil
 }
 
-func (u *uiContext) rmuser(user string) error {
-	if err := u.params.RemoveUser(user); err != nil {
-		errColor.Println(err)
+func (u *uiContext) adduser(user string) error {
+	uuid, err := u.store.NewUser(user)
+	if err == blobformat.ErrNameNotUnique {
+		errColor.Println("user already exists")
 		return nil
+	} else if err != nil {
+		return err
 	}
 
-	infoColor.Println("removed user:", user)
+	var key, salt []byte
+	var pass string
+	if len(u.master) == 0 {
+		u.master, u.ivm, err = crypt.NewMasterKey(cryptVersion)
+		if err != nil {
+			return nil
+		}
+
+		u.user = user
+		key = u.key
+		salt = u.salt
+	} else {
+		pass, err = u.getPassword()
+		if err != nil {
+			return err
+		}
+
+		key, salt, err = crypt.DeriveKey(cryptVersion, []byte(pass))
+		if err != nil {
+			return err
+		}
+	}
+
+	mkey, iv, err := crypt.EncryptMasterKey(cryptVersion, key, u.master)
+	if err != nil {
+		return err
+	}
+
+	u.store.DB.Set(uuid, blobformat.KeySalt, hex.EncodeToString(salt))
+	u.store.DB.Set(uuid, blobformat.KeyIV, hex.EncodeToString(iv))
+	u.store.DB.Set(uuid, blobformat.KeyMKey, hex.EncodeToString(mkey))
+
+	if len(pass) == 0 {
+		infoColor.Printf("re-used your key to create first user: %s\n", user)
+	} else {
+		infoColor.Printf("added user %s\npass: %s\n", user, pass)
+	}
 
 	return nil
 }
 
 func (u *uiContext) rekey(user string) error {
-	key, salt, err := crypt.DeriveKey(cryptVersion, []byte(u.pass))
+	isCurrentUser := len(user) == 0
+
+	var pass string
+	var err error
+	if isCurrentUser {
+		pass = u.pass
+	} else {
+		infoColor.Println("in order to rekey this user we need a new password")
+		pass, err = u.getPassword()
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(pass) == 0 {
+		errColor.Println("refusing to use empty password")
+		return nil
+	}
+
+	key, salt, err := crypt.DeriveKey(cryptVersion, []byte(pass))
 	if err != nil {
 		return err
 	}
 
-	u.params.Rekey(key, salt)
+	if isCurrentUser {
+		// Update fast-path credentials
+		u.pass = pass
+		u.key = key
+		u.salt = salt
+	}
 
-	infoColor.Println("Key updated, bits will be re-encrypted with it on exit")
+	if len(u.master) != 0 {
+		// If we're multi-user we need to update the corresponding user entry
+		username := u.user
+		if len(user) != 0 {
+			username = user
+		}
+
+		uuid, _, err := u.store.MustFindUser(username)
+		if err != nil {
+			return err
+		}
+
+		mkey, iv, err := crypt.EncryptMasterKey(cryptVersion, key, u.master)
+		if err != nil {
+			return err
+		}
+
+		u.store.DB.Set(uuid, blobformat.KeySalt, hex.EncodeToString(salt))
+		u.store.DB.Set(uuid, blobformat.KeyIV, hex.EncodeToString(iv))
+		u.store.DB.Set(uuid, blobformat.KeyMKey, hex.EncodeToString(mkey))
+	}
+
+	infoColor.Println("key updated, bits will be re-encrypted with it on exit")
 	return nil
 }
 
-var rekeyBlurb = `WARNING: This will change ALL user's passwords and print new
+var rekeyAllBlurb = `WARNING: This will change ALL user's passwords and print new
 ones to the screen. No one will be able to access the file with the old
 passwords again after this operation.
 `
 
 func (u *uiContext) rekeyAll() error {
-	errColor.Println(rekeyBlurb)
+	if len(u.master) == 0 {
+		infoColor.Println("this command does nothing for a single user file, see passwd/rekey")
+		return nil
+	}
+
+	errColor.Println(rekeyAllBlurb)
 	yes, err := u.getYesNo("are you sure you wish to proceed?")
 	if err != nil {
 		return err
@@ -141,21 +221,224 @@ func (u *uiContext) rekeyAll() error {
 		return nil
 	}
 
-	passwords, err := u.params.RekeyAll(cryptVersion)
+	master, ivm, err := crypt.NewMasterKey(cryptVersion)
 	if err != nil {
 		return err
 	}
 
-	if u.params.IsMultiUser() {
-		infoColor.Println("new passwords:")
-		for i, user := range u.params.Users {
-			infoColor.Printf("  %x %s\n", user, passwords[i])
-		}
-	} else {
-		infoColor.Println("new password:", passwords[0])
+	users, err := u.store.Users()
+	if err != nil {
+		return err
 	}
 
+	var width int
+	for _, name := range users {
+		username := blobformat.SplitUsername(name)
+		if ln := len(username); ln > width {
+			width = ln
+		}
+	}
+
+	for uuid, name := range users {
+		username := blobformat.SplitUsername(name)
+
+		pass, err := genPassword(32, 0, 0, 0, 0, 0)
+		if err != nil {
+			return err
+		}
+
+		key, salt, err := crypt.DeriveKey(cryptVersion, []byte(pass))
+		if err != nil {
+			return err
+		}
+
+		if username == u.user {
+			// Keep these up to date!
+			u.pass = pass
+			u.key = key
+			u.salt = salt
+		}
+
+		mkey, iv, err := crypt.EncryptMasterKey(cryptVersion, key, u.master)
+		if err != nil {
+			return err
+		}
+
+		u.store.DB.Set(uuid, blobformat.KeySalt, hex.EncodeToString(salt))
+		u.store.DB.Set(uuid, blobformat.KeyIV, hex.EncodeToString(iv))
+		u.store.DB.Set(uuid, blobformat.KeyMKey, hex.EncodeToString(mkey))
+
+		infoColor.Printf("%*s %s\n", width, username+":", pass)
+	}
+
+	u.master = master
+	u.ivm = ivm
+
+	infoColor.Println("master key updated, all users have been rekeyed")
 	return nil
+}
+
+func (u *uiContext) syncAddInterruptible(kind string) error {
+	err := u.syncAdd(kind)
+	switch err {
+	case nil:
+		return nil
+	case ErrEnd:
+		errColor.Println("Aborted")
+		return nil
+	default:
+		return err
+	}
+}
+
+func (u *uiContext) syncAdd(kind string) error {
+	found := false
+	for _, k := range []string{syncSCP} {
+		if k == kind {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		errColor.Printf("%q is not a supported sync kind (old version of bpass?)\n", kind)
+		return nil
+	}
+
+	return u.store.Do(func() error {
+		// New entry
+		uuid, err := u.store.NewSync(kind)
+		if err != nil {
+			return err
+		}
+
+		user, err := u.getString("user")
+		if err != nil {
+			return err
+		}
+
+		host, err := u.getString("host")
+		if err != nil {
+			return err
+		}
+
+		port := "22"
+		for {
+			port, err = u.prompt(promptColor.Sprint("port (22): "))
+			if err != nil {
+				return err
+			}
+
+			if len(port) == 0 {
+				port = "22"
+				break
+			}
+
+			_, err = strconv.Atoi(port)
+			if err != nil {
+				errColor.Printf("port must be an integer between %d and %d\n", 1, int(math.MaxUint16)-1)
+				continue
+			}
+
+			break
+		}
+
+		file, err := u.getString("path")
+		if err != nil {
+			return err
+		}
+
+		var uri url.URL
+		uri.Scheme = kind
+		uri.User = url.User(user)
+		uri.Host = net.JoinHostPort(host, port)
+		uri.Path = file
+
+		promptColor.Println("Key type:")
+		choice, err := u.getMenuChoice(promptColor.Sprint("> "), []string{"ED25519", "RSA 4096", "Password"})
+		if err != nil {
+			return err
+		}
+
+		switch choice {
+		case 0:
+			pub, priv, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				errColor.Println("failed to generate ed25519 ssh key")
+				return nil
+			}
+
+			// Marshal private key into DER ASN.1 then to PEM
+			b, err := x509.MarshalPKCS8PrivateKey(priv)
+			if err != nil {
+				errColor.Println("failed to marshal ed25519 private key with x509:", err)
+			}
+			pemBlock := pem.Block{Type: "PRIVATE KEY", Bytes: b}
+			b = pem.EncodeToMemory(&pemBlock)
+
+			public, err := ssh.NewPublicKey(pub)
+			if err != nil {
+				errColor.Println("failed to parse public key:", err)
+			}
+			publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public))) + " @bpass"
+
+			u.store.Set(uuid, blobformat.KeyPriv, string(bytes.TrimSpace(b)))
+			u.store.Set(uuid, blobformat.KeyPub, publicStr)
+
+			infoColor.Printf("successfully generated new ed25519 key:\n%s\n", publicStr)
+
+		case 1:
+			priv, err := rsa.GenerateKey(rand.Reader, 4096)
+			if err != nil {
+				errColor.Println("failed to generate rsa-4096 ssh key")
+				return nil
+			}
+
+			// Marshal private key into DER ASN.1 then to PEM
+			b, err := x509.MarshalPKCS8PrivateKey(priv)
+			if err != nil {
+				errColor.Println("failed to marshal rsa private key with x509:", err)
+				return nil
+			}
+			pemBlock := pem.Block{Type: "PRIVATE KEY", Bytes: b}
+			b = pem.EncodeToMemory(&pemBlock)
+
+			public, err := ssh.NewPublicKey(&priv.PublicKey)
+			if err != nil {
+				errColor.Println("failed to parse public key:", err)
+			}
+			publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public))) + " @bpass"
+
+			u.store.Set(uuid, blobformat.KeyPriv, string(bytes.TrimSpace(b)))
+			u.store.DB.Set(uuid, blobformat.KeyPub, publicStr)
+
+			infoColor.Printf("successfully generated new rsa-4096 key:\n%s\n", publicStr)
+
+		case 2:
+			pass, err := u.getPassword()
+			if err != nil {
+				return err
+			}
+
+			uri.User = url.UserPassword(user, pass)
+		default:
+			panic("how did this happen?")
+		}
+
+		// Use raw-er sets to avoid timestamp spam
+		u.store.DB.Set(uuid, blobformat.KeySync, "true")
+		u.store.DB.Set(uuid, blobformat.KeyURL, uri.String())
+
+		blob, err := u.store.Find(uuid)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println()
+		infoColor.Println("added new sync entry:", blob.Name())
+
+		return nil
+	})
 }
 
 func (u *uiContext) addNewInterruptible(name string) error {
@@ -214,7 +497,7 @@ func (u *uiContext) addNew(name string) (err error) {
 }
 
 func (u *uiContext) rename(src, dst string) error {
-	oldUUID, _, err := u.store.Find(src)
+	oldUUID, _, err := u.store.FindByName(src)
 	if err != nil {
 		return err
 	}
@@ -235,7 +518,7 @@ func (u *uiContext) rename(src, dst string) error {
 }
 
 func (u *uiContext) deleteEntry(name string) error {
-	uuid, _, err := u.store.Find(name)
+	uuid, _, err := u.store.FindByName(name)
 	if err != nil {
 		return err
 	}
@@ -244,22 +527,45 @@ func (u *uiContext) deleteEntry(name string) error {
 		return nil
 	}
 
+	deleteSelf := false
+	if username := blobformat.SplitUsername(name); len(username) > 0 && username == u.user {
+		deleteSelf = true
+		// We're trying to delete ourselves!
+		// Disallow this unless we're the last user
+		users, err := u.store.Users()
+		if err != nil {
+			return err
+		}
+
+		if len(users) > 1 {
+			errColor.Println("cannot delete yourself while there are other users in the file")
+			return nil
+		}
+	}
+
 	errColor.Printf("WARNING: This will delete all data associated with %q\n", name)
 	errColor.Println("Including ALL history irrecoverably, are you sure you wish to proceed?")
 	fmt.Println()
 
 	line, err := u.prompt(promptColor.Sprintf("type %q to proceed: ", name))
-	if err != nil {
+	if err != nil && err != ErrEnd {
+		return err
+	}
+
+	if line != name {
 		errColor.Println("Aborted")
 		return nil
 	}
 
-	if line == name {
-		u.store.Delete(uuid)
-		errColor.Println("DELETED", name)
-	} else {
-		errColor.Println("Aborted")
+	if deleteSelf {
+		// We are always the last user and so we must should clear the master
+		// key and IVM to ensure that we are not encrypted as a multi-user file
+		u.master = nil
+		u.ivm = nil
 	}
+
+	u.store.Delete(uuid)
+	errColor.Printf("DELETED: %q\n", name)
 
 	return nil
 }
@@ -273,7 +579,7 @@ func (u *uiContext) deleteKey(search, key string) error {
 		return nil
 	}
 
-	blob, err := u.store.Get(uuid)
+	blob, err := u.store.MustFind(uuid)
 	if err != nil {
 		return err
 	}
@@ -331,7 +637,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		return nil
 	}
 
-	blob, err := u.store.Get(uuid)
+	blob, err := u.store.MustFind(uuid)
 	if err != nil {
 		return err
 	}
@@ -365,9 +671,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 			fmt.Println(val)
 		}
 	default:
-		entry := txlogs.Entry(blob)
-
-		value, ok := entry[key]
+		value, ok := blob[key]
 		if !ok {
 			errColor.Printf("%s.%s is not set", blob.Name(), key)
 		}
@@ -440,7 +744,7 @@ func (u *uiContext) edit(search, key string) error {
 		return nil
 	}
 
-	blob, err := u.store.Get(uuid)
+	blob, err := u.store.MustFind(uuid)
 	if err != nil {
 		errColor.Println(err)
 		return nil
@@ -552,7 +856,7 @@ func (u *uiContext) addLabels(search string) error {
 		return nil
 	}
 
-	blob, err := u.store.Get(uuid)
+	blob, err := u.store.MustFind(uuid)
 	if err != nil {
 		return err
 	}
@@ -601,7 +905,7 @@ func (u *uiContext) deleteLabel(search string, label string) error {
 		return nil
 	}
 
-	blob, err := u.store.Get(uuid)
+	blob, err := u.store.MustFind(uuid)
 	if err != nil {
 		return err
 	}
@@ -642,7 +946,7 @@ func (u *uiContext) show(search string, snapshot int) error {
 		return nil
 	}
 
-	blob, err := u.store.Get(uuid)
+	blob, err := u.store.MustFind(uuid)
 	if err != nil {
 		return err
 	}
@@ -709,8 +1013,7 @@ func (u *uiContext) show(search string, snapshot int) error {
 			continue
 		}
 
-		entry := txlogs.Entry(blob)
-		val, ok := entry[k]
+		val, ok := blob[k]
 		if !ok {
 			continue
 		}
@@ -782,7 +1085,7 @@ func (u *uiContext) openurl(search string) error {
 		return nil
 	}
 
-	blob, err := u.store.Get(uuid)
+	blob, err := u.store.MustFind(uuid)
 	if err != nil {
 		return err
 	}
@@ -815,7 +1118,7 @@ func (u *uiContext) dump(search string) error {
 		return nil
 	}
 
-	blob, err := u.store.Get(uuid)
+	blob, err := u.store.MustFind(uuid)
 	if err != nil {
 		return err
 	}

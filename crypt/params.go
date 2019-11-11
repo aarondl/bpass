@@ -310,12 +310,8 @@ func (p Params) validate(c config) error {
 		return nil
 	}
 
-	if p.version != c.version && (len(p.Master) != 0 || len(p.IVM) != 0) {
-		return ErrNeedFullRekey
-	}
-
 	if len(p.Keys) != p.NUsers {
-		return errors.New("must have at least one salt")
+		return errors.New("must have at least one key")
 	}
 	if len(p.Salts) != p.NUsers {
 		return errors.New("must have at least one salt")

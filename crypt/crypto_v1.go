@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -13,6 +14,20 @@ import (
 	"github.com/aarondl/bpass/pkcs7"
 	"golang.org/x/crypto/scrypt"
 )
+
+// newMasterKeyV1 generates a multi-user master key and iv
+func newMasterKeyV1(c config) (master, ivm []byte, err error) {
+	master = make([]byte, c.keySize)
+	if _, err := io.ReadFull(rand.Reader, master); err != nil {
+		return nil, nil, err
+	}
+	ivm = make([]byte, c.blockSize)
+	if _, err := io.ReadFull(rand.Reader, ivm); err != nil {
+		return nil, nil, err
+	}
+
+	return master, ivm, nil
+}
 
 // encryptV1 creates this format:
 // 8:magic|4:version|4:0|32:passphraseSalt|blockSize:iv|(64:sha512|data)
@@ -82,27 +97,6 @@ func encryptV1Single(c config, p *Params, plaintext []byte) (encrypted []byte, e
 }
 
 func encryptV1Multi(c config, p *Params, plaintext []byte) (encrypted []byte, err error) {
-	fullRekey := false
-
-	if len(p.Master) == 0 {
-		fullRekey = true
-		p.Master = make([]byte, c.keySize)
-		if _, err := io.ReadFull(rand.Reader, p.Master); err != nil {
-			return nil, err
-		}
-	}
-	if len(p.IVM) == 0 {
-		fullRekey = true
-		p.IVM = make([]byte, c.blockSize)
-		if _, err := io.ReadFull(rand.Reader, p.IVM); err != nil {
-			return nil, err
-		}
-	}
-
-	if fullRekey && !allKeysCheck(p) {
-		return nil, ErrNeedFullRekey
-	}
-
 	cipherSuite, err := cipherSuite(c)
 	if err != nil {
 		return nil, err
@@ -130,51 +124,6 @@ func encryptV1Multi(c config, p *Params, plaintext []byte) (encrypted []byte, er
 		offset += sha256.Size
 		copy(plaintextHeader[offset:], p.Salts[i])
 		offset += c.saltSize
-
-		hasIV := len(p.IVs[i]) != 0
-		hasMK := len(p.MKeys[i]) != 0
-		// Because mk = cbc(key, iv, master)
-		// If either iv needs to be regenerated or mk is missing, we need
-		// the user's key to be present.
-		if len(key) == 0 && (!hasIV || !hasMK) {
-			return nil, fmt.Errorf("user %d:%x needs a rekey but key is missing",
-				i, p.Users[i])
-		}
-
-		// If IV is nil, generate one
-		if !hasIV {
-			p.IVs[i] = make([]byte, c.keySize)
-			if _, err := io.ReadFull(rand.Reader, p.IVs[i]); err != nil {
-				return nil, fmt.Errorf("error generating randomness for iv: %w", err)
-			}
-		}
-
-		// If mk is nil, encrypt master with cbc(iv, key)
-		if !hasMK {
-			newMaster := make([]byte, len(p.Master))
-			copy(newMaster, p.Master)
-
-			ciphers, err := makeCiphers(p.Keys[i], cipherSuite)
-			if err != nil {
-				return nil, err
-			}
-
-			ivOffset := 0
-			iv := p.IVs[i]
-			for i, c := range ciphers {
-				cipherBlockSize := cipherSuite[i].BlockSize
-
-				// Pull out blockSize iv bytes for our cipher
-				cbc := cipher.NewCBCEncrypter(c, iv[ivOffset:ivOffset+cipherBlockSize])
-				ivOffset += cipherBlockSize
-
-				// pad & encrypt
-				cbc.CryptBlocks(newMaster, newMaster)
-			}
-
-			p.MKeys[i] = newMaster
-		}
-
 		copy(plaintextHeader[offset:], p.IVs[i])
 		offset += c.blockSize
 		copy(plaintextHeader[offset:], p.MKeys[i])
@@ -215,14 +164,45 @@ func encryptV1Multi(c config, p *Params, plaintext []byte) (encrypted []byte, er
 	return append(plaintextHeader, work...), nil
 }
 
-func allKeysCheck(p *Params) bool {
-	for i := 0; i < p.NUsers; i++ {
-		if len(p.Keys[i]) == 0 {
-			return false
-		}
+func encryptMasterKeyV1(c config, userKey []byte, master []byte) (cryptedMaster, iv []byte, err error) {
+	if len(master) != c.keySize {
+		return nil, nil, errors.New("master key wrong size")
+	}
+	if len(userKey) != c.keySize {
+		return nil, nil, errors.New("user key size wrong")
 	}
 
-	return true
+	cryptedMaster = make([]byte, len(master))
+	copy(cryptedMaster, master)
+
+	cipherSuite, err := cipherSuite(c)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ciphers, err := makeCiphers(userKey, cipherSuite)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	iv = make([]byte, c.blockSize)
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return nil, nil, fmt.Errorf("error generating randomness for iv: %w", err)
+	}
+
+	ivOffset := 0
+	for i, c := range ciphers {
+		cipherBlockSize := cipherSuite[i].BlockSize
+
+		// Pull out blockSize iv bytes for our cipher
+		cbc := cipher.NewCBCEncrypter(c, iv[ivOffset:ivOffset+cipherBlockSize])
+		ivOffset += cipherBlockSize
+
+		// encrypt
+		cbc.CryptBlocks(cryptedMaster, cryptedMaster)
+	}
+
+	return cryptedMaster, iv, nil
 }
 
 func decryptV1(c config, user, passphrase, key, salt, encrypted []byte) (p Params, plaintext []byte, err error) {
@@ -317,9 +297,12 @@ func decryptV1Single(c config, passphrase, key, salt, encrypted []byte) (p Param
 	if len(p.Salts) == 0 {
 		p.Salts = [][]byte{nil}
 	}
+	if len(p.IVs) == 0 {
+		p.IVs = [][]byte{nil}
+	}
 	p.Keys[0] = key
 	p.Salts[0] = salt
-	p.IVM = iv
+	p.IVs[0] = iv
 	return p, plaintext, nil
 }
 

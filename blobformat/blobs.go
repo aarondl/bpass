@@ -175,10 +175,40 @@ func (b Blobs) SearchLabels(labels ...string) (entries SearchResults, err error)
 	return entries, nil
 }
 
-// Find a particular blob by name. Returns "", nil if it does not find the
-// object searched for. Error does not occur unless something unexpected
+// Find returns nil if it does not find the object searched for.
+// Error does not occur unless something unexpected happened. This is slightly
+// useful because it calls UpdateSnapshot for you which does not happen
+// when accessing the map directly.
+func (b Blobs) Find(uuid string) (Blob, error) {
+	if err := b.UpdateSnapshot(); err != nil {
+		return nil, err
+	}
+
+	blob, ok := b.DB.Snapshot[uuid]
+	if !ok {
+		return nil, nil
+	}
+	return Blob(blob), nil
+}
+
+// MustFind is Find() but never returns a nil blob, panics instead.
+func (b Blobs) MustFind(uuid string) (Blob, error) {
+	blob, err := b.Find(uuid)
+	if err != nil {
+		return nil, err
+	}
+
+	if blob == nil {
+		panic("could not find entry with uuid: " + uuid)
+	}
+
+	return blob, nil
+}
+
+// FindByName returns "", nil if it does not find the
+// object. Error does not occur unless something unexpected
 // happened.
-func (b Blobs) Find(name string) (string, Blob, error) {
+func (b Blobs) FindByName(name string) (string, Blob, error) {
 	if err := b.UpdateSnapshot(); err != nil {
 		return "", nil, err
 	}
@@ -193,20 +223,23 @@ func (b Blobs) Find(name string) (string, Blob, error) {
 	return "", nil, nil
 }
 
-// FindByUUID returns nil if it does not find the object searched for.
-// Error does not occur unless something unexpected happened. This is slightly
-// useful because it calls UpdateSnapshot for you which does not happen
-// when accessing the map directly.
-func (b Blobs) FindByUUID(uuid string) (Blob, error) {
-	if err := b.UpdateSnapshot(); err != nil {
-		return nil, err
+// FindUser return "", nil if the user could not be found.
+func (b Blobs) FindUser(username string) (string, Blob, error) {
+	return b.FindByName(userPrefix + username)
+}
+
+// MustFindUser never returns uuid or Blob
+func (b Blobs) MustFindUser(username string) (string, Blob, error) {
+	uuid, blob, err := b.FindUser(username)
+	if err != nil {
+		return "", nil, err
 	}
 
-	blob, ok := b.DB.Snapshot[uuid]
-	if !ok {
-		return nil, nil
+	if len(uuid) == 0 {
+		panic("could not find user with name: " + username)
 	}
-	return Blob(blob), nil
+
+	return uuid, blob, nil
 }
 
 func (b Blobs) allEntries() (entries SearchResults) {
@@ -248,18 +281,27 @@ func (s SearchResults) Names() []string {
 	return names
 }
 
-// Get named object. Panics if name is not found.
-func (b Blobs) Get(uuid string) (Blob, error) {
-	if err := b.UpdateSnapshot(); err != nil {
+// Users finds all the users in the system
+func (b Blobs) Users() (results SearchResults, err error) {
+	if err = b.UpdateSnapshot(); err != nil {
 		return nil, err
 	}
 
-	obj, ok := b.DB.Snapshot[uuid]
-	if !ok {
-		panic(uuid + " entry not found")
+	for uuid, entry := range b.DB.Snapshot {
+		blob := Blob(entry)
+
+		if !IsUserEntry(blob.Name()) {
+			continue
+		}
+
+		if results == nil {
+			results = make(SearchResults)
+		}
+
+		results[uuid] = blob.Name()
 	}
 
-	return Blob(obj), nil
+	return results, nil
 }
 
 // New creates a new entry. It will return ErrNameNotUnique if the name
@@ -373,7 +415,7 @@ func (b Blobs) SetTwofactor(uuid, uriOrKey string) error {
 
 // AddLabel to entry.
 func (b Blobs) AddLabel(uuid, label string) (err error) {
-	entry, err := b.Get(uuid)
+	entry, err := b.MustFind(uuid)
 	if err != nil {
 		return err
 	}
@@ -393,7 +435,7 @@ func (b Blobs) AddLabel(uuid, label string) (err error) {
 
 // RemoveLabel from uuid using the list element's index
 func (b Blobs) RemoveLabel(uuid string, index int) (err error) {
-	entry, err := b.Get(uuid)
+	entry, err := b.MustFind(uuid)
 	if err != nil {
 		return err
 	}
@@ -436,6 +478,28 @@ func (b Blobs) NewSync(kind string) (uuid string, err error) {
 	}
 
 	return uuid, nil
+}
+
+// NewUser creates a new blob and ensures that the user's name is unique,
+// if the user name is not unique it returns an error.
+func (b Blobs) NewUser(name string) (uuid string, err error) {
+	return b.New(userPrefix + name)
+}
+
+// IsUserEntry checks to see if the name conforms to user standards
+func IsUserEntry(name string) bool {
+	return strings.HasPrefix(name, userPrefix)
+}
+
+// SplitUsername returns a username from an entry name, returns empty string
+// if this was not a proper user entryname
+func SplitUsername(entryname string) string {
+	index := strings.Index(entryname, userPrefix)
+	if index < 0 {
+		return ""
+	}
+
+	return entryname[index+len(userPrefix):]
 }
 
 // touchUpdated refreshes the updated timestamp for the given item

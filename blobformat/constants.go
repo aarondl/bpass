@@ -21,10 +21,16 @@ const (
 	KeyPriv       = "privkey"
 	KeyPub        = "pubkey"
 	KeyKnownHosts = "knownhosts"
+
+	// User keys
+	KeyIV   = "iv"
+	KeySalt = "salt"
+	KeyMKey = "mkey"
 )
 
 const (
 	syncPrefix = "sync/"
+	userPrefix = "user/"
 )
 
 var (
@@ -53,6 +59,9 @@ var (
 
 		// Forbidden
 		KeyName,
+		KeyIV,
+		KeySalt,
+		KeyMKey,
 
 		// Dates
 		KeyUpdated,

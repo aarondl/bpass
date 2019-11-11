@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -17,25 +16,6 @@ import (
 	"github.com/atotto/clipboard"
 	colorable "github.com/mattn/go-colorable"
 )
-
-type uiContext struct {
-	// Input
-	in LineEditor
-	// Output
-	out io.Writer
-
-	created       bool
-	filename      string
-	shortFilename string
-
-	// Decrypted and decoded storage
-	store blobformat.Blobs
-
-	// save user & password for syncing later
-	user   string
-	pass   string
-	params *crypt.Params
-}
 
 var (
 	version      = "unknown"
@@ -177,8 +157,8 @@ func (u *uiContext) loadBlob() error {
 			return err
 		}
 
-		u.params = new(crypt.Params)
-		u.params.SetSingleUser(key, salt)
+		u.key = key
+		u.salt = salt
 	} else {
 		// Read in the file, decrypt it, parse the blob data.
 		payload, err := ioutil.ReadFile(flagFile)
@@ -206,9 +186,13 @@ func (u *uiContext) loadBlob() error {
 		if err != nil {
 			return err
 		}
-		u.params = &params
+
 		u.user = user
 		u.pass = pwd
+		u.key = params.Keys[params.User]
+		u.salt = params.Salts[params.User]
+		u.master = params.Master
+		u.ivm = params.IVM
 
 		store, err := txlogs.New(pt)
 		if err != nil {
@@ -232,7 +216,7 @@ func (u *uiContext) saveBlob() error {
 		return err
 	}
 
-	data, err = crypt.Encrypt(cryptVersion, u.params, data)
+	data, err = crypt.Encrypt(cryptVersion, u.makeParams(), data)
 	if err != nil {
 		return err
 	}

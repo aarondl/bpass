@@ -10,24 +10,14 @@ import (
 )
 
 const replHelp = `Bpass repl uses analogs to basic unix commands for general
-familiarity and brevity however it's important to note that there's no actual
+familiarity and brevity however it's important to note that there is no actual
 directory hierarchy, you can however "cd" into an entry to omit specifying
-the entry query in key commands.
+the entry name as a query in the key commands below.
 
 General Commands:
- help  - This help (how did you find this without seeing this help?)
- exit  - Exit the repl
-
-User/Password Commands (manage users who can access the file):
- adduser <user> - Add user to the file (first add turns into multi-user file)
- rmuser  <user> - Remove user from file (removing all converts into single-user)
- passwd  [user] - Change the file's password for current user, or a specific user
- rekey   [user] - Rekey the file (change salt) for current user, or a specific user
- rekeyall       - Nuclear button, change all passwords & master key for all users
-
-Sync Commands (synchronize the file with remote sources):
- sync    [name]  - Sync (Pull, Merge, Push) the file to all auto-sync accounts (or a given account)
- addsync <kind>  - Sync entry setup wizard (help sync for more details)
+ passwd       - Change the file's password for current user
+ help [topic] - This help (how did you find this without seeing this help?)
+ exit         - Exit the repl
 
 Entry Commands (manage entries in the file):
  add <name>      - Add a new entry
@@ -55,9 +45,8 @@ Clipboard copy shortcuts (alias of cp <query> <key>):
  email <query>       - Copy email to clipboard
  totp  <query>       - Copy twofactor to clipboard
 
-Debug commands:
- dump <query>      - Dumps an entire entry in debug mode
- dumpall           - Dumps the entire store in debug mode
+Other help topics (use help <topic>):
+ sync, users, other
 
 Common Arguments:
   name:   a fully qualified name
@@ -65,11 +54,18 @@ Common Arguments:
   index:  the number representing the item, not 0-based
 `
 
-var syncHelp = `Syncing in bpass is done via sync entries. This is just a
-normal entry with specific fields filled in. Which fields largely depends on
-which kind of syncing you're doing. The recommended way to add a sync account
-is to use addsync <kind> and follow the wizard. That said, a url of the correct
-form, and any additional required fields is all it takes to make a sync account.
+var syncHelp = `Syncing the file with remotes in bpass is done via sync entries.
+
+A sync entry must have a url key with the type of sync as it's schema
+(eg. scp://) as the most basic requirement.
+
+Certain sync types (such as scp) may require other keys to be present to work
+correctly. The best way to ensure that you have a properly configured sync
+entry is to use the "addsync" command.
+
+Additionally if the "sync" key of an entry is set to "true" then this entry
+will be automatically synchronized when an auto-sync occurs (usually
+when opening/closing the file, or running "sync" with no arguments)
 
 Types of sync: scp, file
 
@@ -78,6 +74,35 @@ Example of values in an auto-sync scp account:
  sync: true
  privkey: ======= RSA PRIVATE KEY ======= ...
  pubkey: ssh-rsa AAA...238da friend@bpass.com
+
+Sync Commands:
+ sync    [name]  - Sync (Pull, Merge, Push) the file to all auto-sync accounts (or a given account)
+ addsync <kind>  - Sync entry setup wizard (help sync for more details)
+`
+
+var usersHelp = `Users in bpass are managed using user entries.
+
+When you first start a file, it is a single-user file and multi-user is not
+considered at all. When you first call adduser, the current user (you) are
+converted to a user entry in the database (user/<username>).
+
+Users are just entries with a particular naming scheme of: user/<username>
+
+These entries contain many system fields that cannot be set manually but apart
+from those user entries are unremarkable and can be renamed with mv or deleted
+with rm. (Remember when renaming to keep the user/ prefix intact or the user
+will no longer be considered a user).
+
+User/Password Commands:
+ adduser <user> - Add user to the file (first add should use current user's username)
+ passwd  [user] - Change the file's password for current user, or a specific user
+ rekey   [user] - Rekey the file (change salt) for current user, or a specific user
+ rekeyall       - Nuclear button, change all passwords & master key for all users
+`
+
+var otherHelp = `Debug commands:
+ dump <query>      - Dumps an entire entry in debug mode
+ dumpall           - Dumps the entire store in debug mode
 `
 
 const (
@@ -137,13 +162,6 @@ func (r *repl) run() error {
 			}
 
 			err = r.ctx.adduser(splits[0])
-		case "rmuser":
-			if len(splits) == 0 {
-				errColor.Println("syntax: rmuser <user>")
-				continue
-			}
-
-			err = r.ctx.rmuser(splits[0])
 
 		case "rekey":
 			var user string
@@ -219,7 +237,7 @@ func (r *repl) run() error {
 					continue
 				}
 
-				blob, err := r.ctx.store.Get(uuid)
+				blob, err := r.ctx.store.MustFind(uuid)
 				if err != nil {
 					return err
 				}
@@ -434,11 +452,14 @@ func (r *repl) run() error {
 			err = r.ctx.dumpall()
 
 		case "help":
-			switch {
-			case len(splits) > 0 && splits[0] == "sync":
-				fmt.Println(syncHelp)
-			default:
-				fmt.Println(replHelp)
+			if len(splits) == 0 {
+				fmt.Print(replHelp)
+			} else if splits[0] == "sync" {
+				fmt.Print(syncHelp)
+			} else if splits[0] == "users" {
+				fmt.Print(usersHelp)
+			} else if splits[0] == "other" {
+				fmt.Print(otherHelp)
 			}
 
 		case "exit":
