@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 
 	"github.com/aarondl/bpass/blobformat"
@@ -75,7 +74,6 @@ func (u *uiContext) makeParams() *crypt.Params {
 			panic("user entry had bad mkey")
 		}
 
-		fmt.Println(u.user, name)
 		if u.user == name {
 			p.User = index
 			p.Keys = append(p.Keys, u.key)

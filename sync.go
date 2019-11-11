@@ -238,7 +238,7 @@ func collectSyncs(store blobformat.Blobs) ([]string, error) {
 		}
 
 		switch u.Scheme {
-		case syncSCP:
+		case syncSCP, syncFile:
 			validSyncs = append(validSyncs, uuid)
 		default:
 			errColor.Printf("entry %q is a %q sync account, but this kind is unknown (old bpass version?)\n", name, u.Scheme)
@@ -260,7 +260,7 @@ func pullBlob(u *uiContext, uuid string) (ct []byte, hostentry string, err error
 		if scpsync.IsNotFoundErr(err) {
 			return nil, hostentry, errNotFound
 		}
-	case syncLocal:
+	case syncFile:
 		path := filepath.FromSlash(uri.Path)
 		ct, err = ioutil.ReadFile(path)
 		if os.IsNotExist(err) {
@@ -283,7 +283,7 @@ func pushBlob(u *uiContext, uuid string, payload []byte) (hostentry string, err 
 	switch uri.Scheme {
 	case syncSCP:
 		hostentry, err = sshPush(u, entry, payload)
-	case syncLocal:
+	case syncFile:
 		path := filepath.FromSlash(uri.Path)
 		err = ioutil.WriteFile(path, payload, 0600)
 	}

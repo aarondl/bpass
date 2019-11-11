@@ -44,8 +44,8 @@ var (
 )
 
 const (
-	syncSCP   = "scp"
-	syncLocal = "file"
+	syncSCP  = "scp"
+	syncFile = "file"
 )
 
 func (u *uiContext) passwd(user string) error {
@@ -278,8 +278,8 @@ func (u *uiContext) rekeyAll() error {
 	return nil
 }
 
-func (u *uiContext) syncAddInterruptible(kind string) error {
-	err := u.syncAdd(kind)
+func (u *uiContext) addSyncInterruptible(kind string) error {
+	err := u.addSync(kind)
 	switch err {
 	case nil:
 		return nil
@@ -291,9 +291,9 @@ func (u *uiContext) syncAddInterruptible(kind string) error {
 	}
 }
 
-func (u *uiContext) syncAdd(kind string) error {
+func (u *uiContext) addSync(kind string) error {
 	found := false
-	for _, k := range []string{syncSCP} {
+	for _, k := range []string{syncSCP, syncFile} {
 		if k == kind {
 			found = true
 			break
@@ -306,123 +306,34 @@ func (u *uiContext) syncAdd(kind string) error {
 	}
 
 	return u.store.Do(func() error {
-		// New entry
 		uuid, err := u.store.NewSync(kind)
 		if err != nil {
 			return err
 		}
 
-		user, err := u.getString("user")
-		if err != nil {
-			return err
-		}
-
-		host, err := u.getString("host")
-		if err != nil {
-			return err
-		}
-
-		port := "22"
-		for {
-			port, err = u.prompt(promptColor.Sprint("port (22): "))
-			if err != nil {
-				return err
-			}
-
-			if len(port) == 0 {
-				port = "22"
-				break
-			}
-
-			_, err = strconv.Atoi(port)
-			if err != nil {
-				errColor.Printf("port must be an integer between %d and %d\n", 1, int(math.MaxUint16)-1)
-				continue
-			}
-
-			break
-		}
-
-		file, err := u.getString("path")
-		if err != nil {
-			return err
-		}
-
 		var uri url.URL
-		uri.Scheme = kind
-		uri.User = url.User(user)
-		uri.Host = net.JoinHostPort(host, port)
-		uri.Path = file
-
-		promptColor.Println("Key type:")
-		choice, err := u.getMenuChoice(promptColor.Sprint("> "), []string{"ED25519", "RSA 4096", "Password"})
-		if err != nil {
-			return err
-		}
-
-		switch choice {
-		case 0:
-			pub, priv, err := ed25519.GenerateKey(rand.Reader)
-			if err != nil {
-				errColor.Println("failed to generate ed25519 ssh key")
-				return nil
-			}
-
-			// Marshal private key into DER ASN.1 then to PEM
-			b, err := x509.MarshalPKCS8PrivateKey(priv)
-			if err != nil {
-				errColor.Println("failed to marshal ed25519 private key with x509:", err)
-			}
-			pemBlock := pem.Block{Type: "PRIVATE KEY", Bytes: b}
-			b = pem.EncodeToMemory(&pemBlock)
-
-			public, err := ssh.NewPublicKey(pub)
-			if err != nil {
-				errColor.Println("failed to parse public key:", err)
-			}
-			publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public))) + " @bpass"
-
-			u.store.Set(uuid, blobformat.KeyPriv, string(bytes.TrimSpace(b)))
-			u.store.Set(uuid, blobformat.KeyPub, publicStr)
-
-			infoColor.Printf("successfully generated new ed25519 key:\n%s\n", publicStr)
-
-		case 1:
-			priv, err := rsa.GenerateKey(rand.Reader, 4096)
-			if err != nil {
-				errColor.Println("failed to generate rsa-4096 ssh key")
-				return nil
-			}
-
-			// Marshal private key into DER ASN.1 then to PEM
-			b, err := x509.MarshalPKCS8PrivateKey(priv)
-			if err != nil {
-				errColor.Println("failed to marshal rsa private key with x509:", err)
-				return nil
-			}
-			pemBlock := pem.Block{Type: "PRIVATE KEY", Bytes: b}
-			b = pem.EncodeToMemory(&pemBlock)
-
-			public, err := ssh.NewPublicKey(&priv.PublicKey)
-			if err != nil {
-				errColor.Println("failed to parse public key:", err)
-			}
-			publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public))) + " @bpass"
-
-			u.store.Set(uuid, blobformat.KeyPriv, string(bytes.TrimSpace(b)))
-			u.store.DB.Set(uuid, blobformat.KeyPub, publicStr)
-
-			infoColor.Printf("successfully generated new rsa-4096 key:\n%s\n", publicStr)
-
-		case 2:
-			pass, err := u.getPassword()
+		switch kind {
+		case syncFile:
+			file, err := u.getString("path")
 			if err != nil {
 				return err
 			}
 
-			uri.User = url.UserPassword(user, pass)
-		default:
-			panic("how did this happen?")
+			abs, err := filepath.Abs(file)
+			if err != nil {
+				errColor.Printf("could not get abs path of %q: %v", file, err)
+				return ErrEnd
+			}
+
+			if abs != file {
+				infoColor.Println("using path:", abs)
+			}
+
+			uri = url.URL{Scheme: syncFile, Path: abs}
+		case syncSCP:
+			if uri, err = addSCPEntry(u, uuid); err != nil {
+				return err
+			}
 		}
 
 		// Use raw-er sets to avoid timestamp spam
@@ -439,6 +350,122 @@ func (u *uiContext) syncAdd(kind string) error {
 
 		return nil
 	})
+}
+
+func addSCPEntry(u *uiContext, uuid string) (uri url.URL, err error) {
+	user, err := u.getString("user")
+	if err != nil {
+		return uri, err
+	}
+
+	host, err := u.getString("host")
+	if err != nil {
+		return uri, err
+	}
+
+	port := "22"
+	for {
+		port, err = u.prompt(promptColor.Sprint("port (22): "))
+		if err != nil {
+			return uri, err
+		}
+
+		if len(port) == 0 {
+			port = "22"
+			break
+		}
+
+		_, err = strconv.Atoi(port)
+		if err != nil {
+			errColor.Printf("port must be an integer between %d and %d\n", 1, int(math.MaxUint16)-1)
+			continue
+		}
+
+		break
+	}
+
+	file, err := u.getString("path")
+	if err != nil {
+		return uri, err
+	}
+
+	uri.Scheme = syncSCP
+	uri.User = url.User(user)
+	uri.Host = net.JoinHostPort(host, port)
+	uri.Path = file
+
+	promptColor.Println("Key type:")
+	choice, err := u.getMenuChoice(promptColor.Sprint("> "), []string{"ED25519", "RSA 4096", "Password"})
+	if err != nil {
+		return uri, err
+	}
+
+	switch choice {
+	case 0:
+		pub, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			errColor.Println("failed to generate ed25519 ssh key")
+			return uri, nil
+		}
+
+		// Marshal private key into DER ASN.1 then to PEM
+		b, err := x509.MarshalPKCS8PrivateKey(priv)
+		if err != nil {
+			errColor.Println("failed to marshal ed25519 private key with x509:", err)
+		}
+		pemBlock := pem.Block{Type: "PRIVATE KEY", Bytes: b}
+		b = pem.EncodeToMemory(&pemBlock)
+
+		public, err := ssh.NewPublicKey(pub)
+		if err != nil {
+			errColor.Println("failed to parse public key:", err)
+		}
+		publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public))) + " @bpass"
+
+		u.store.Set(uuid, blobformat.KeyPriv, string(bytes.TrimSpace(b)))
+		u.store.Set(uuid, blobformat.KeyPub, publicStr)
+
+		infoColor.Printf("successfully generated new ed25519 key:\n%s\n", publicStr)
+
+	case 1:
+		priv, err := rsa.GenerateKey(rand.Reader, 4096)
+		if err != nil {
+			errColor.Println("failed to generate rsa-4096 ssh key")
+			return uri, nil
+		}
+
+		// Marshal private key into DER ASN.1 then to PEM
+		b, err := x509.MarshalPKCS8PrivateKey(priv)
+		if err != nil {
+			errColor.Println("failed to marshal rsa private key with x509:", err)
+			return uri, nil
+		}
+		pemBlock := pem.Block{Type: "PRIVATE KEY", Bytes: b}
+		b = pem.EncodeToMemory(&pemBlock)
+
+		public, err := ssh.NewPublicKey(&priv.PublicKey)
+		if err != nil {
+			errColor.Println("failed to parse public key:", err)
+		}
+		publicStr := string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public))) + " @bpass"
+
+		u.store.Set(uuid, blobformat.KeyPriv, string(bytes.TrimSpace(b)))
+		u.store.DB.Set(uuid, blobformat.KeyPub, publicStr)
+
+		infoColor.Printf("successfully generated new rsa-4096 key:\n%s\n", publicStr)
+
+	case 2:
+		pass, err := u.getPassword()
+		if err != nil {
+			return uri, err
+		}
+
+		uri.User = url.UserPassword(user, pass)
+	default:
+		panic("how did this happen?")
+	}
+
+	return uri, nil
 }
 
 func (u *uiContext) addNewInterruptible(name string) error {

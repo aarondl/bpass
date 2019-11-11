@@ -431,10 +431,10 @@ func (r *repl) run() error {
 
 		case "addsync":
 			if len(splits) == 0 {
-				errColor.Println("syntax: syncadd <kind>")
+				errColor.Println("syntax: addsync <kind>")
 				continue
 			}
-			err = r.ctx.syncAdd(splits[0])
+			err = r.ctx.addSyncInterruptible(splits[0])
 
 		case "dump":
 			name := r.ctxEntry
