@@ -10,6 +10,7 @@ var (
 	flagHelp        bool
 	flagNoColor     bool
 	flagNoClearClip bool
+	flagNoAutoSync  bool
 	flagFile        string = "passwd.blob"
 )
 
@@ -22,6 +23,7 @@ var (
 func parseCli() {
 	parser := flaggy.NewParser("bpass")
 	parser.Bool(&flagNoColor, "", "no-color", "Turn off color output")
+	parser.Bool(&flagNoAutoSync, "", "no-sync", "Do not sync the file automatically")
 	parser.Bool(&flagNoClearClip, "", "no-clear-clip", "Do not clear clipboard on exit")
 	parser.Bool(&flagHelp, "h", "help", "Show help")
 	parser.String(&flagFile, "f", "file", "The file to open")

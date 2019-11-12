@@ -82,6 +82,13 @@ func main() {
 			goto Exit
 		}
 	default:
+		if !flagNoAutoSync {
+			if err = ctx.sync("", true, true); err != nil {
+				fmt.Println("failed to synchronize:", err)
+				goto Exit
+			}
+		}
+
 		if err = r.run(); err != nil {
 			if err == ErrInterrupt {
 				fmt.Println("exiting, did not save file")
@@ -89,6 +96,13 @@ func main() {
 			}
 			fmt.Printf("error occurred: %+v\n", err)
 			goto Exit
+		}
+
+		if !flagNoAutoSync {
+			if err = ctx.sync("", true, true); err != nil {
+				fmt.Println("failed to synchronize:", err)
+				goto Exit
+			}
 		}
 	}
 
