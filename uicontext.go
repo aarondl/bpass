@@ -17,6 +17,7 @@ type uiContext struct {
 	out io.Writer
 
 	created       bool
+	readOnly      bool
 	filename      string
 	shortFilename string
 

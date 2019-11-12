@@ -122,9 +122,9 @@ func mergeBlobs(u *uiContext, remotes []blobParts) (m mergeResult, err error) {
 		} else if !bytes.Equal(u.master, r.Params.Master) {
 			// There's been a master change in a multi multi
 
-			localStore := blobformat.Blobs{&txlogs.DB{Log: m.Log}}
-			mergedStore := blobformat.Blobs{&txlogs.DB{Log: merged}}
-			remoteStore := blobformat.Blobs{&txlogs.DB{Log: merged}}
+			localStore := blobformat.Blobs{DB: &txlogs.DB{Log: m.Log}}
+			mergedStore := blobformat.Blobs{DB: &txlogs.DB{Log: merged}}
+			remoteStore := blobformat.Blobs{DB: &txlogs.DB{Log: merged}}
 			userUUID, localUser, err := localStore.FindUser(m.User)
 			if err != nil {
 				return m, err

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -111,6 +112,10 @@ const (
 	dirPrompt       = "(%s):%s> "
 )
 
+var (
+	errExit = errors.New("exit")
+)
+
 type repl struct {
 	ctx *uiContext
 
@@ -123,7 +128,6 @@ func (r *repl) run() error {
 	r.ctxEntry = ""
 
 	for {
-		unknownCmd := false
 		line, err := r.ctx.in.Line(r.prompt)
 		switch err {
 		case ErrInterrupt:
@@ -138,103 +142,166 @@ func (r *repl) run() error {
 		}
 
 		line = strings.TrimSpace(line)
-		splits := strings.Fields(line)
-		if len(splits) == 0 {
+		args := strings.Fields(line)
+		if len(args) == 0 {
 			continue
 		}
 
-		cmd := splits[0]
-		splits = splits[1:]
+		cmd := args[0]
+		// Special case this thing, no commands care about additional space
+		// except set
+		if cmd == "set" {
+			args = strings.Split(line, " ")
+		}
+		args = args[1:]
 
-		switch cmd {
-		case "passwd":
+		replCommand, ok := replCmds[cmd]
+		if !ok {
+			fmt.Println(`unknown command, try "help"`)
+			continue
+		}
+
+		if r.ctx.readOnly && !replCommand.ReadOnly {
+			errColor.Println("cannot use write commands in read-only mode")
+			continue
+		}
+
+		err = replCommand.Run(r, cmd, args)
+		if err != nil {
+			return err
+		}
+
+		r.ctx.in.AddHistory(line)
+	}
+}
+
+type replCmd struct {
+	ReadOnly bool
+	Run      func(r *repl, cmd string, args []string) error
+}
+
+var replCmds = map[string]replCmd{
+	"passwd": {
+		Run: func(r *repl, cmd string, args []string) error {
 			var user string
-			if len(splits) > 0 {
-				user = splits[0]
+			if len(args) > 0 {
+				user = args[0]
 			}
 
-			err = r.ctx.passwd(user)
+			return r.ctx.passwd(user)
+		},
+	},
 
-		case "adduser":
-			if len(splits) == 0 {
+	"adduser": {
+		Run: func(r *repl, _ string, args []string) error {
+			if len(args) == 0 {
 				errColor.Println("syntax: adduser <user>")
-				continue
+				return nil
 			}
 
-			err = r.ctx.adduser(splits[0])
+			return r.ctx.adduser(args[0])
+		},
+	},
 
-		case "rekey":
+	"rekey": {
+		Run: func(r *repl, _ string, args []string) error {
 			var user string
-			if len(splits) > 0 {
-				user = splits[0]
+			if len(args) > 0 {
+				user = args[0]
 			}
 
-			err = r.ctx.rekey(user)
+			return r.ctx.rekey(user)
+		},
+	},
 
-		case "rekeyall":
-			err = r.ctx.rekeyAll()
+	"rekeyall": {
+		Run: func(r *repl, _ string, args []string) error {
+			return r.ctx.rekeyAll()
+		},
+	},
 
-		case "add":
-			if len(splits) < 1 {
+	"add": {
+		Run: func(r *repl, _ string, args []string) error {
+			if len(args) < 1 {
 				errColor.Println("syntax: add <name>")
-				continue
+				return nil
 			}
-			err = r.ctx.addNewInterruptible(splits[0])
+			return r.ctx.addNewInterruptible(args[0])
+		},
+	},
 
-		case "mv":
-			if len(splits) < 2 {
+	"mv": {
+		Run: func(r *repl, _ string, args []string) error {
+			if len(args) < 2 {
 				errColor.Println("syntax: mv <old> <new>")
-				continue
+				return nil
 			}
 
-			err = r.ctx.rename(splits[0], splits[1])
+			return r.ctx.rename(args[0], args[1])
+		},
+	},
 
-		case "rm":
-			if len(splits) < 1 {
+	"rm": {
+		Run: func(r *repl, _ string, args []string) error {
+			if len(args) < 1 {
 				errColor.Println("syntax: rm <name>")
-				continue
+				return nil
 			}
-			name := splits[0]
-			err = r.ctx.deleteEntry(name)
+			name := args[0]
+			err := r.ctx.deleteEntry(name)
 
 			if err == nil && r.ctxEntry == name {
 				r.ctxEntry = ""
 				r.prompt = mainPromptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 			}
 
-		case "rmk":
+			return err
+		},
+	},
+
+	"rmk": {
+		Run: func(r *repl, _ string, args []string) error {
 			name := r.ctxEntry
-			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
+			if len(args) < 1 || (len(name) == 0 && len(args) < 2) {
 				errColor.Println("syntax: rmk <query> <key>")
-				continue
+				return nil
 			}
 
 			if len(name) == 0 {
-				name = splits[0]
-				splits = splits[1:]
+				name = args[0]
+				args = args[1:]
 			}
 
-			err = r.ctx.deleteKey(name, splits[0])
+			return r.ctx.deleteKey(name, args[0])
+		},
+	},
 
-		case "ls":
+	"ls": {
+		ReadOnly: true,
+		Run: func(r *repl, _ string, args []string) error {
 			query := ""
-			if len(splits) != 0 {
-				query = splits[0]
+			if len(args) != 0 {
+				query = args[0]
 			}
-			err = r.ctx.list(query)
+			return r.ctx.list(query)
+		},
+	},
 
-		case "cd":
-			switch len(splits) {
+	"cd": {
+		ReadOnly: true,
+		Run: func(r *repl, _ string, args []string) error {
+			switch len(args) {
 			case 0:
 				r.prompt = mainPromptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 			case 1:
 				var uuid string
-				uuid, err = r.ctx.findOne(splits[0])
+				var err error
+				uuid, err = r.ctx.findOne(args[0])
 				if err != nil {
 					return err
 				}
 				if len(uuid) == 0 {
-					continue
+					return nil
 				}
 
 				blob, err := r.ctx.store.MustFind(uuid)
@@ -248,48 +315,19 @@ func (r *repl) run() error {
 				fmt.Println("cd needs an argument")
 			}
 
-		case "cp", "get":
-			name := r.ctxEntry
-			if len(splits) < 1 || (len(splits) < 2 && len(name) == 0) {
-				errColor.Printf("syntax: %s <query> <key> [index]\n", cmd)
-				continue
-			}
+			return nil
+		},
+	},
 
-			if len(name) == 0 {
-				name = splits[0]
-				splits = splits[1:]
-			}
+	"cp":                    {ReadOnly: true, Run: getCopy},
+	"get":                   {ReadOnly: true, Run: getCopy},
+	blobformat.KeyUser:      {ReadOnly: true, Run: quickCopy},
+	blobformat.KeyPass:      {ReadOnly: true, Run: quickCopy},
+	blobformat.KeyEmail:     {ReadOnly: true, Run: quickCopy},
+	blobformat.KeyTwoFactor: {ReadOnly: true, Run: quickCopy},
 
-			key := splits[0]
-			splits = splits[1:]
-
-			index := -1
-			if len(splits) != 0 {
-				i, err := strconv.Atoi(splits[0])
-				if err != nil {
-					errColor.Println("Index must be an integer")
-					continue
-				}
-				index = i
-			}
-
-			err = r.ctx.get(name, key, index, cmd == "cp")
-
-		case "totp", blobformat.KeyUser, blobformat.KeyPass, blobformat.KeyEmail:
-			name := r.ctxEntry
-			if len(splits) < 1 && len(name) == 0 {
-				errColor.Printf("syntax: %s <query>\n", cmd)
-				continue
-			}
-
-			if len(name) == 0 {
-				name = splits[0]
-				splits = splits[1:]
-			}
-
-			err = r.ctx.get(name, cmd, -1, true)
-
-		case "set":
+	"set": {
+		Run: func(r *repl, cmd string, args []string) error {
 			name := r.ctxEntry
 			var key, value string
 
@@ -300,183 +338,253 @@ func (r *repl) run() error {
 			// set name key
 			// set name key value
 
-			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
+			// Set's args are a special case, they are given from
+			// strings.Split not strings.Fields which means there are
+			// potentially empty string arguments lurking around.
+
+			syntaxErr := func() error {
 				errColor.Println("syntax: set <query> <key> [value]")
-				continue
+				return nil
+			}
+
+			if len(args) < 1 || (len(name) == 0 && len(args) < 2) {
+				return syntaxErr()
 			}
 
 			if len(name) == 0 {
-				name = splits[0]
-				splits = splits[1:]
+				name = args[0]
+				args = args[1:]
 			}
 
-			key = splits[0]
-			splits = splits[1:]
+			key = args[0]
+			args = args[1:]
 
-			if len(splits) != 0 {
-				value = splits[0]
-				splits = splits[1:]
+			if len(name) == 0 || len(key) == 0 {
+				return syntaxErr()
 			}
 
-			if len(splits) > 0 {
-				// This means there's extra pieces at the end, because we
-				// parsed with strings.Fields() recombining with strings.Join
-				// is lossy. In order to have a nice interface we'll find the
-				// key in the line after the set command (so we don't get fooled
-				// by keys named set)
-				indexKey := strings.Index(line[3:], key)
-				if indexKey <= 0 {
-					errColor.Println("failed to parse set command")
-					continue
-				}
-
-				// 3 = compensation for offsetting the slice above
-				// 1 = space between key and value
-				indexKey += 3 + 1 + len(key)
-				value = line[indexKey:]
+			if len(args) == 1 {
+				value = args[0]
+			} else if len(args) > 1 {
+				value = strings.Join(args, " ")
 			}
 
-			err = r.ctx.set(name, key, value)
+			return r.ctx.set(name, key, value)
+		},
+	},
 
-		case "edit":
+	"edit": {
+		Run: func(r *repl, cmd string, args []string) error {
 			name := r.ctxEntry
-			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
+			if len(args) < 1 || (len(name) == 0 && len(args) < 2) {
 				errColor.Println("syntax: edit <query> <key>")
-				continue
+				return nil
 			}
 
 			if len(name) == 0 {
-				name = splits[0]
-				splits = splits[1:]
+				name = args[0]
+				args = args[1:]
 			}
 
-			key := splits[0]
-			err = r.ctx.edit(name, key)
+			key := args[0]
+			return r.ctx.edit(name, key)
+		},
+	},
 
-		case "open":
+	"open": {
+		ReadOnly: true,
+		Run: func(r *repl, cmd string, args []string) error {
 			name := r.ctxEntry
 			if len(name) == 0 {
-				if len(splits) == 0 {
+				if len(args) == 0 {
 					errColor.Println("syntax: open <query>")
-					continue
+					return nil
 				}
-				name = splits[0]
+				name = args[0]
 			}
 
-			err = r.ctx.openurl(name)
+			return r.ctx.openurl(name)
+		},
+	},
 
-		case "label":
+	"label": {
+		Run: func(r *repl, cmd string, args []string) error {
 			name := r.ctxEntry
 			if len(name) == 0 {
-				if len(splits) == 0 {
+				if len(args) == 0 {
 					errColor.Println("syntax: label <query>")
-					continue
+					return nil
 				}
-				name = splits[0]
+				name = args[0]
 			}
 
-			err = r.ctx.addLabels(name)
+			return r.ctx.addLabels(name)
+		},
+	},
 
-		case "rmlabel":
+	"rmlabel": {
+		Run: func(r *repl, cmd string, args []string) error {
 			name := r.ctxEntry
-			if len(splits) < 1 || (len(name) == 0 && len(splits) < 2) {
+			if len(args) < 1 || (len(name) == 0 && len(args) < 2) {
 				errColor.Println("syntax: rmlabel <query> <label>")
-				continue
+				return nil
 			}
 
 			if len(name) == 0 {
-				name = splits[0]
-				splits = splits[1:]
+				name = args[0]
+				args = args[1:]
 			}
 
-			err = r.ctx.deleteLabel(name, splits[0])
+			return r.ctx.deleteLabel(name, args[0])
+		},
+	},
 
-		case "labels":
-			if len(splits) == 0 {
+	"labels": {
+		ReadOnly: true,
+		Run: func(r *repl, cmd string, args []string) error {
+			if len(args) == 0 {
 				errColor.Println("syntax: labels <label...>")
-				continue
+				return nil
 			}
 
-			err = r.ctx.listByLabels(splits)
+			return r.ctx.listByLabels(args)
+		},
+	},
 
-		case "show":
+	"show": {
+		ReadOnly: true,
+		Run: func(r *repl, cmd string, args []string) error {
 			name := r.ctxEntry
 			snapshot := 0
+			var err error
 			if len(name) == 0 {
 				// We need to get a name
-				if len(splits) == 0 {
+				if len(args) == 0 {
 					errColor.Println("syntax: show <query> [snapshot]")
-					continue
+					return nil
 				}
-				name = splits[0]
-				splits = splits[1:]
+				name = args[0]
+				args = args[1:]
 
 			}
-			if len(splits) != 0 {
+			if len(args) != 0 {
 				// The user gave us a snapshot ^_^
-				snapshot, err = strconv.Atoi(splits[0])
+				snapshot, err = strconv.Atoi(args[0])
 				if err != nil {
 					snapshot = 0
 				}
 			}
-			err = r.ctx.show(name, snapshot)
+			return r.ctx.show(name, snapshot)
+		},
+	},
 
-		case "sync":
+	"sync": {
+		Run: func(r *repl, cmd string, args []string) error {
 			var name string
-			if len(splits) > 0 {
-				name = splits[0]
+			if len(args) > 0 {
+				name = args[0]
 			}
 
-			err = r.ctx.sync(name, false, true)
+			return r.ctx.sync(name, false, true)
+		},
+	},
 
-		case "addsync":
-			if len(splits) == 0 {
+	"addsync": {
+		Run: func(r *repl, cmd string, args []string) error {
+			if len(args) == 0 {
 				errColor.Println("syntax: addsync <kind>")
-				continue
+				return nil
 			}
-			err = r.ctx.addSyncInterruptible(splits[0])
+			return r.ctx.addSyncInterruptible(args[0])
+		},
+	},
 
-		case "dump":
+	"dump": {
+		ReadOnly: true,
+		Run: func(r *repl, cmd string, args []string) error {
 			name := r.ctxEntry
 			if len(name) == 0 {
-				if len(splits) == 0 {
+				if len(args) == 0 {
 					errColor.Println("syntax: dump <query>")
-					continue
+					return nil
 				}
-				name = splits[0]
+				name = args[0]
 			}
 
-			err = r.ctx.dump(name)
+			return r.ctx.dump(name)
+		},
+	},
 
-		case "dumpall":
-			err = r.ctx.dumpall()
+	"dumpall": {
+		ReadOnly: true,
+		Run: func(r *repl, cmd string, args []string) error {
+			return r.ctx.dumpall()
+		},
+	},
 
-		case "help":
-			if len(splits) == 0 {
+	"help": {
+		ReadOnly: true,
+		Run: func(r *repl, cmd string, args []string) error {
+			if len(args) == 0 {
 				fmt.Print(replHelp)
-			} else if splits[0] == "sync" {
+			} else if args[0] == "sync" {
 				fmt.Print(syncHelp)
-			} else if splits[0] == "users" {
+			} else if args[0] == "users" {
 				fmt.Print(usersHelp)
-			} else if splits[0] == "other" {
+			} else if args[0] == "other" {
 				fmt.Print(otherHelp)
 			}
-
-		case "exit":
 			return nil
+		},
+	},
 
-		default:
-			unknownCmd = true
-		}
+	"exit": {
+		ReadOnly: true,
+		Run: func(r *repl, cmd string, args []string) error {
+			return errExit
+		},
+	},
+}
 
-		if err != nil {
-			return err
-		}
-
-		if unknownCmd {
-			fmt.Println(`unknown command, try "help"`)
-		} else {
-			r.ctx.in.AddHistory(line)
-		}
+func getCopy(r *repl, cmd string, args []string) error {
+	name := r.ctxEntry
+	if len(args) < 1 || (len(args) < 2 && len(name) == 0) {
+		errColor.Printf("syntax: %s <query> <key> [index]\n", cmd)
+		return nil
 	}
+
+	if len(name) == 0 {
+		name = args[0]
+		args = args[1:]
+	}
+
+	key := args[0]
+	args = args[1:]
+
+	index := -1
+	if len(args) != 0 {
+		i, err := strconv.Atoi(args[0])
+		if err != nil {
+			errColor.Println("Index must be an integer")
+			return nil
+		}
+		index = i
+	}
+
+	return r.ctx.get(name, key, index, cmd == "cp")
+}
+
+func quickCopy(r *repl, cmd string, args []string) error {
+	name := r.ctxEntry
+	if len(args) < 1 && len(name) == 0 {
+		errColor.Printf("syntax: %s <query>\n", cmd)
+		return nil
+	}
+
+	if len(name) == 0 {
+		name = args[0]
+		args = args[1:]
+	}
+
+	return r.ctx.get(name, cmd, -1, true)
 }

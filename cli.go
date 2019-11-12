@@ -1,16 +1,25 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"time"
 
 	"github.com/integrii/flaggy"
 )
 
+const (
+	historyLayout = "2006-01-02 15:04:05"
+)
+
 var (
+	historyTime time.Time
+
 	flagHelp        bool
 	flagNoColor     bool
 	flagNoClearClip bool
 	flagNoAutoSync  bool
+	flagTime        string
 	flagFile        string = "passwd.blob"
 )
 
@@ -26,13 +35,14 @@ func parseCli() {
 	parser.Bool(&flagNoAutoSync, "", "no-sync", "Do not sync the file automatically")
 	parser.Bool(&flagNoClearClip, "", "no-clear-clip", "Do not clear clipboard on exit")
 	parser.Bool(&flagHelp, "h", "help", "Show help")
+	parser.String(&flagTime, "t", "time", "Open the file read-only at a time in the past (YYYY-MM-DD HH:mm:ss)")
 	parser.String(&flagFile, "f", "file", "The file to open")
 
 	versionCmd.Description = "print version and exit"
 	lpassImportCmd.Description = "import lastpass csv by running `lpass export`"
 	genCmd.Description = "generate a password"
 
-	parser.AdditionalHelpAppend = "bpass respects $EDITOR and $PINENTRY env vars"
+	parser.AdditionalHelpAppend = "bpass respects $EDITOR and $PINENTRY env vars\n$PINENTRY can be set to none to prevent it from using pinentry"
 
 	parser.ShowHelpWithHFlag = false
 	parser.ShowHelpOnUnexpected = false
@@ -49,9 +59,18 @@ func parseCli() {
 	parser.AttachSubcommand(lpassImportCmd, 1)
 	parser.Parse()
 
+	if len(flagTime) != 0 {
+		var err error
+		historyTime, err = time.Parse(historyLayout, flagTime)
+		if err != nil {
+			fmt.Println("failed to parse the date flag, format:", historyLayout)
+			os.Exit(1)
+		}
+	}
+
 	if flagHelp {
 		parser.ShowHelp()
-		os.Exit(1)
+		os.Exit(0)
 	}
 }
 

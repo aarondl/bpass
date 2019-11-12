@@ -42,6 +42,9 @@ func main() {
 		color.Writer = writer
 		ctx.out = writer
 	}
+	if !historyTime.IsZero() {
+		ctx.readOnly = true
+	}
 
 	// setup readline needs to have the filenames parsed and ready
 	// to use from above
@@ -82,7 +85,7 @@ func main() {
 			goto Exit
 		}
 	default:
-		if !flagNoAutoSync {
+		if !ctx.readOnly && !flagNoAutoSync {
 			if err = ctx.sync("", true, true); err != nil {
 				fmt.Println("failed to synchronize:", err)
 				goto Exit
@@ -98,7 +101,7 @@ func main() {
 			goto Exit
 		}
 
-		if !flagNoAutoSync {
+		if !ctx.readOnly && !flagNoAutoSync {
 			if err = ctx.sync("", true, true); err != nil {
 				fmt.Println("failed to synchronize:", err)
 				goto Exit
@@ -219,12 +222,29 @@ func (u *uiContext) loadBlob() error {
 	// It's possible the store was empty/null even on a load, just create it
 	if u.store.DB == nil {
 		u.store = blobformat.Blobs{DB: new(txlogs.DB)}
+	} else if u.readOnly {
+		infoColor.Println("opened file in read-only mode at:", historyTime.Format("January 02, 2006 - 15:04:05"))
+		u.store.DB.ResetSnapshot()
+		historyUnix := historyTime.UnixNano()
+		for i, tx := range u.store.DB.Log {
+			if tx.Time > historyUnix {
+				u.store.DB.Log = u.store.DB.Log[0:i]
+				break
+			}
+		}
+		if err := u.store.DB.UpdateSnapshot(); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
 func (u *uiContext) saveBlob() error {
+	if u.readOnly {
+		return nil
+	}
+
 	data, err := u.store.Save()
 	if err != nil {
 		return err
