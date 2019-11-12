@@ -338,7 +338,17 @@ func decryptV1Multi(c config, nUsers int, user, passphrase, key, salt, encrypted
 	}
 
 	if p.User < 0 {
-		return p, nil, ErrUnknownUser
+		// Here we could return ErrUnknownUser, but this is bad
+		// for security, lets just create some 0 bytes for the headers etc
+		// and let the cryptography fail.
+		p.Keys = append(p.Keys, nil)
+		p.Salts = append(p.Salts, make([]byte, c.saltSize))
+		p.IVs = append(p.IVs, make([]byte, c.blockSize))
+		p.MKeys = append(p.MKeys, make([]byte, c.keySize))
+		p.User = len(p.Keys) - 1
+		p.NUsers++
+
+		//return p, nil, ErrUnknownUser
 	}
 
 	p.IVM = make([]byte, c.blockSize)
