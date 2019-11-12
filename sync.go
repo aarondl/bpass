@@ -155,7 +155,11 @@ Syncs:
 	if pt, err = u.store.Save(); err != nil {
 		return err
 	}
-	if ct, err = crypt.Encrypt(cryptVersion, u.makeParams(), pt); err != nil {
+	params, err := u.makeParams()
+	if err != nil {
+		return err
+	}
+	if ct, err = crypt.Encrypt(cryptVersion, params, pt); err != nil {
 		return err
 	}
 

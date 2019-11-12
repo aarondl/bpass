@@ -216,7 +216,12 @@ func (u *uiContext) saveBlob() error {
 		return err
 	}
 
-	data, err = crypt.Encrypt(cryptVersion, u.makeParams(), data)
+	params, err := u.makeParams()
+	if err != nil {
+		return err
+	}
+
+	data, err = crypt.Encrypt(cryptVersion, params, data)
 	if err != nil {
 		return err
 	}

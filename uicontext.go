@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 
 	"github.com/aarondl/bpass/blobformat"
@@ -32,12 +33,12 @@ type uiContext struct {
 	key, salt, master, ivm []byte
 }
 
-func (u *uiContext) makeParams() *crypt.Params {
+func (u *uiContext) makeParams() (*crypt.Params, error) {
 	if len(u.master) == 0 {
 		return &crypt.Params{
 			Keys:  [][]byte{u.key},
 			Salts: [][]byte{u.salt},
-		}
+		}, nil
 	}
 
 	var p crypt.Params
@@ -51,27 +52,27 @@ func (u *uiContext) makeParams() *crypt.Params {
 	for uuid, name := range users {
 		name = blobformat.SplitUsername(name)
 		if len(name) == 0 {
-			panic("name was not a username")
+			return nil, errors.New("params name was not a username")
 		}
 
 		username := sha256.Sum256([]byte(name))
 
 		blob, err := u.store.MustFind(uuid)
 		if err != nil {
-			panic("could not find user we just found")
+			return nil, errors.New("could not find user we just found")
 		}
 
 		salt, err := hex.DecodeString(blob[blobformat.KeySalt])
 		if err != nil {
-			panic("user entry had bad salt")
+			return nil, errors.New("user entry had bad salt")
 		}
 		iv, err := hex.DecodeString(blob[blobformat.KeyIV])
 		if err != nil {
-			panic("user entry had bad iv")
+			return nil, errors.New("user entry had bad iv")
 		}
 		mkey, err := hex.DecodeString(blob[blobformat.KeyMKey])
 		if err != nil {
-			panic("user entry had bad mkey")
+			return nil, errors.New("user entry had bad mkey")
 		}
 
 		if u.user == name {
@@ -91,5 +92,5 @@ func (u *uiContext) makeParams() *crypt.Params {
 	p.IVM = u.ivm
 	p.Master = u.master
 
-	return &p
+	return &p, nil
 }
