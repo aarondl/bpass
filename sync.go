@@ -93,7 +93,7 @@ Syncs:
 		hash := sha512.Sum512(ct)
 		for _, d := range dupeCheck {
 			if hash == d {
-				infoColor.Printf("skipping merge (duplicate): %q\n", name)
+				infoColor.Printf("skip: %s (duplicate remote)\n", name)
 				continue Syncs
 			}
 		}
@@ -112,6 +112,14 @@ Syncs:
 		log, err := txlogs.NewLog(pt)
 		if err != nil {
 			errColor.Printf("failed parsing log %q: %v\n", name, err)
+			syncs[i] = ""
+			continue
+		}
+
+		if len(log) == len(u.store.DB.Log) &&
+			log[0].Time == u.store.DB.Log[0].Time &&
+			log[len(log)-1].Time == u.store.DB.Log[len(u.store.DB.Log)-1].Time {
+			infoColor.Printf("skip: %s (no changes)\n", name)
 			syncs[i] = ""
 			continue
 		}
