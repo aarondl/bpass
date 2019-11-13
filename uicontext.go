@@ -16,8 +16,10 @@ type uiContext struct {
 	// Output
 	out io.Writer
 
-	created       bool
-	readOnly      bool
+	created  bool
+	readOnly bool
+	startTx  int
+
 	filename      string
 	shortFilename string
 

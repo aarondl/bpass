@@ -101,7 +101,8 @@ func main() {
 			goto Exit
 		}
 
-		if !ctx.readOnly && !flagNoAutoSync {
+		wrote := ctx.startTx != len(ctx.store.DB.Log)
+		if wrote && !ctx.readOnly && !flagNoAutoSync {
 			if err = ctx.sync("", true, true); err != nil {
 				fmt.Println("failed to synchronize:", err)
 				goto Exit
@@ -236,6 +237,9 @@ func (u *uiContext) loadBlob() error {
 			return err
 		}
 	}
+
+	// Save this to know if we've actually edited the database in some way
+	u.startTx = len(u.store.DB.Log)
 
 	return nil
 }
