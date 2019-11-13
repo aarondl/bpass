@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/integrii/flaggy"
@@ -30,6 +31,13 @@ var (
 )
 
 func parseCli() {
+	defaultFilePath := ".bpass"
+	homeDir, err := os.UserHomeDir()
+	if err == nil && len(homeDir) != 0 {
+		defaultFilePath = filepath.Join(homeDir, flagFile)
+	}
+	flagFile = defaultFilePath
+
 	parser := flaggy.NewParser("bpass")
 	parser.Bool(&flagNoColor, "", "no-color", "Turn off color output")
 	parser.Bool(&flagNoAutoSync, "", "no-sync", "Do not sync the file automatically")
@@ -59,14 +67,11 @@ func parseCli() {
 	parser.AttachSubcommand(lpassImportCmd, 1)
 	parser.Parse()
 
-	if len(flagFile) == 0 {
+	if flagFile == defaultFilePath {
 		envFile := os.Getenv("BPASS")
-		if len(envFile) == 0 {
-			fmt.Println("must specify a filename")
-			os.Exit(1)
+		if len(envFile) != 0 {
+			flagFile = envFile
 		}
-
-		flagFile = envFile
 	}
 	if len(flagTime) != 0 {
 		var err error

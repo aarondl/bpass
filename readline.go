@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 
 	"github.com/chzyer/readline"
 )
 
+type completer func(string) []string
+
 func setupLineEditor(u *uiContext) error {
 	var err error
-	u.in, err = newReadlineEditor(u.out)
+	u.in, err = newReadlineEditor(u.out, entryCompleter(u))
 	return err
 }
 
@@ -23,8 +26,8 @@ type readlineEditor struct {
 	out              io.Writer
 }
 
-func newReadlineEditor(out io.Writer) (readlineEditor, error) {
-	instance, err := readline.NewEx(readlineConfig(out, nil))
+func newReadlineEditor(out io.Writer, fn completer) (readlineEditor, error) {
+	instance, err := readline.NewEx(readlineConfig(out, fn))
 	if err != nil {
 		return readlineEditor{}, err
 	}
@@ -32,7 +35,7 @@ func newReadlineEditor(out io.Writer) (readlineEditor, error) {
 	return readlineEditor{instance: instance, out: out}, nil
 }
 
-func readlineConfig(out io.Writer, entryCompleter func(string) []string) *readline.Config {
+func readlineConfig(out io.Writer, entryCompleter completer) *readline.Config {
 	var completer readline.AutoCompleter
 	if entryCompleter != nil {
 		completer = readlineAutocompleter(entryCompleter)
@@ -109,13 +112,35 @@ func (r readlineEditor) SetEntryCompleter(entryCompleter func(string) []string) 
 	r.instance.SetConfig(readlineConfig(r.out, entryCompleter))
 }
 
+func entryCompleter(u *uiContext) func(string) []string {
+	return func(s string) []string {
+		if u == nil || u.store.DB == nil {
+			return nil
+		}
+
+		entries, err := u.store.Search("")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "failed to search through store for tab complete:", err)
+			return nil
+		}
+
+		names := entries.Names()
+		sort.Strings(names)
+		return names
+	}
+}
+
 func readlineAutocompleter(entryCompleter func(string) []string) readline.AutoCompleter {
 	return readline.NewPrefixCompleter(
+		readline.PcItem("passwd"),
+		readline.PcItem("help"),
+		readline.PcItem("exit"),
 		readline.PcItem("add"),
 		readline.PcItem("rm", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("mv", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("ls"),
 		readline.PcItem("cd", readline.PcItemDynamic(entryCompleter)),
+		readline.PcItem("labels"),
 		readline.PcItem("show", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("set",
 			readline.PcItemDynamic(entryCompleter,
@@ -123,8 +148,6 @@ func readlineAutocompleter(entryCompleter func(string) []string) readline.AutoCo
 				readline.PcItem("user"),
 				readline.PcItem("pass"),
 				readline.PcItem("totp"),
-				readline.PcItem("twofactor"),
-				readline.PcItem("labels"),
 				readline.PcItem("notes"),
 			),
 		),
@@ -134,10 +157,7 @@ func readlineAutocompleter(entryCompleter func(string) []string) readline.AutoCo
 				readline.PcItem("user"),
 				readline.PcItem("pass"),
 				readline.PcItem("totp"),
-				readline.PcItem("twofactor"),
-				readline.PcItem("labels"),
 				readline.PcItem("notes"),
-				readline.PcItem("updated"),
 			),
 		),
 		readline.PcItem("cp",
@@ -146,28 +166,38 @@ func readlineAutocompleter(entryCompleter func(string) []string) readline.AutoCo
 				readline.PcItem("user"),
 				readline.PcItem("pass"),
 				readline.PcItem("totp"),
-				readline.PcItem("twofactor"),
-				readline.PcItem("labels"),
+				readline.PcItem("notes"),
+			),
+		),
+		readline.PcItem("edit",
+			readline.PcItemDynamic(entryCompleter,
+				readline.PcItem("email"),
+				readline.PcItem("user"),
+				readline.PcItem("pass"),
+				readline.PcItem("totp"),
 				readline.PcItem("notes"),
 			),
 		),
 		readline.PcItem("open", readline.PcItemDynamic(entryCompleter)),
-		readline.PcItem("note", readline.PcItemDynamic(entryCompleter)),
-		readline.PcItem("rmnote", readline.PcItemDynamic(entryCompleter)),
+		readline.PcItem("rmk",
+			readline.PcItemDynamic(entryCompleter,
+				readline.PcItem("email"),
+				readline.PcItem("user"),
+				readline.PcItem("pass"),
+				readline.PcItem("totp"),
+				readline.PcItem("notes"),
+			),
+		),
 		readline.PcItem("label", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("rmlabel", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("pass", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("user", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("email", readline.PcItemDynamic(entryCompleter)),
 		readline.PcItem("totp", readline.PcItemDynamic(entryCompleter)),
-		readline.PcItem("sync",
-			readline.PcItem("add",
-				readline.PcItem("ssh"),
-			),
-			readline.PcItem("rm",
-				readline.PcItem("ssh"),
-			),
-		),
+		readline.PcItem("sync", readline.PcItemDynamic(entryCompleter)),
+		readline.PcItem("addsync"),
+		readline.PcItem("adduser"),
+		readline.PcItem("rekey"),
 	)
 }
 
