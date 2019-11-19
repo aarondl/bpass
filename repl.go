@@ -292,6 +292,7 @@ var replCmds = map[string]replCmd{
 		Run: func(r *repl, _ string, args []string) error {
 			switch len(args) {
 			case 0:
+				r.ctxEntry = ""
 				r.prompt = mainPromptColor.Sprintf(normalPrompt, r.ctx.shortFilename)
 			case 1:
 				var uuid string
