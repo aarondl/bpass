@@ -167,7 +167,9 @@ func (r *repl) run() error {
 		}
 
 		err = replCommand.Run(r, cmd, args)
-		if err != nil {
+		if err == errExit {
+			return nil
+		} else if err != nil {
 			return err
 		}
 
