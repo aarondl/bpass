@@ -2,6 +2,7 @@ package crypt
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"sort"
 	"testing"
 )
@@ -30,7 +31,9 @@ func TestCrypt(t *testing.T) {
 		}
 
 		var p Params
-		p.SetSingleUser(key, salt)
+		p.version = 1
+		p.Keys = [][]byte{key}
+		p.Salts = [][]byte{salt}
 		ciphertext, err := Encrypt(v, &p, plaintext)
 		if err != nil {
 			t.Fatalf("%d) %v", v, err)
@@ -79,8 +82,13 @@ func TestCryptMulti(t *testing.T) {
 		t.Skip("skipping long test")
 	}
 
-	passphrase := []byte("hunter42")
+	passphrase1 := []byte("hunter42?")
+	passphrase2 := []byte("hunter42!")
 	plaintext := []byte("plaintext goes here")
+	master, miv, err := NewMasterKey(1)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var versionNumbers []int
 	for v := range versions {
@@ -90,18 +98,41 @@ func TestCryptMulti(t *testing.T) {
 	sort.Ints(versionNumbers)
 
 	for _, v := range versionNumbers {
-		key1, salt1, err := DeriveKey(v, passphrase)
+		key1, salt1, err := DeriveKey(v, passphrase1)
 		if err != nil {
 			t.Errorf("%d) failed to derive key: %v", v, err)
 		}
-		key2, salt2, err := DeriveKey(v, passphrase)
+		key2, salt2, err := DeriveKey(v, passphrase2)
 		if err != nil {
 			t.Errorf("%d) failed to derive key: %v", v, err)
 		}
 
+		mkey1, iv1, err := EncryptMasterKey(1, key1, master)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mkey2, iv2, err := EncryptMasterKey(1, key2, master)
+		if err != nil {
+			t.Fatal(err)
+		}
+
 		var p Params
-		p.AddUser("user1", key1, salt1)
-		p.AddUser("user2", key2, salt2)
+		p.version = 1
+		p.NUsers = 2
+		user1Sum := sha256.Sum256([]byte("user1"))
+		user2Sum := sha256.Sum256([]byte("user2"))
+		p.Users = append(p.Users, user1Sum[:])
+		p.Users = append(p.Users, user2Sum[:])
+		p.Keys = append(p.Keys, key1)
+		p.Keys = append(p.Keys, key2)
+		p.Salts = append(p.Salts, salt1)
+		p.Salts = append(p.Salts, salt2)
+		p.MKeys = append(p.MKeys, mkey1)
+		p.MKeys = append(p.MKeys, mkey2)
+		p.IVs = append(p.IVs, iv1)
+		p.IVs = append(p.IVs, iv2)
+		p.Master = master
+		p.IVM = miv
 
 		ciphertext, err := Encrypt(v, &p, plaintext)
 		if err != nil {
@@ -112,9 +143,9 @@ func TestCryptMulti(t *testing.T) {
 			t.Errorf("%d) the plain text is visible", v)
 		}
 
-		version, p, gotPlaintext, err := Decrypt([]byte("user1"), passphrase, nil, nil, ciphertext)
+		version, p, gotPlaintext, err := Decrypt([]byte("user1"), passphrase1, nil, nil, ciphertext)
 		if err != nil {
-			t.Error(err)
+			t.Fatal(err)
 		}
 
 		if version != v {
