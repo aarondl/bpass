@@ -25,6 +25,9 @@ jobs:
         run: go mod download
         env: { GOPROXY: 'https://proxy.golang.org' }
 
+      - name: chmodhome
+        run: chmod 0755 $HOME
+
       - name: test
         run: go test -v ./...
 
