@@ -51,7 +51,7 @@ jobs:
 
       - name: tag parsing
         id: tag_parse
-        # Nasty bash script to set metadata for 
+        # Nasty bash script to set metadata for tagged commands
         run: echo ::set-output name=tag::${GITHUB_REF/refs\/tags\//}
 
       - name: build-linux
@@ -61,7 +61,7 @@ jobs:
           GOARCH: amd64
 
       - name: package-linux
-        run: tar czf bpass-${{ gsteps.tag_parse.outputs.tag }}-linux-x86_64.tar.gz bpass && rm bpass
+        run: tar czf bpass-${{ steps.tag_parse.outputs.tag }}-linux-x86_64.tar.gz bpass && rm bpass
 
       - name: build-darwin
         run: go build -o bpass -trimpath -ldflags '-X main.version=${{ steps.tag_parse.outputs.tag }}'
@@ -70,16 +70,16 @@ jobs:
           GOARCH: amd64
 
       - name: package-darwin
-        run: tar czf bpass-${{ gsteps.tag_parse.outputs.tag }}-darwin-x86_64.tar.gz bpass && rm bpass
+        run: tar czf bpass-${{ steps.tag_parse.outputs.tag }}-darwin-x86_64.tar.gz bpass && rm bpass
 
       - name: build-windows
-        run: go build -o bpass.exe -trimpath -ldflags '-X main.version=${{ gsteps.tag_parse.outputs.tag }}'
+        run: go build -o bpass.exe -trimpath -ldflags '-X main.version=${{ steps.tag_parse.outputs.tag }}'
         env:
           GOOS: windows
           GOARCH: amd64
 
       - name: package-windows
-        run: zip bpass-${{ gsteps.tag_parse.outputs.tag }}-windows-x86_64.zip bpass.exe && rm bpass.exe
+        run: zip bpass-${{ steps.tag_parse.outputs.tag }}-windows-x86_64.zip bpass.exe && rm bpass.exe
 
       - name: create gh release
         id: create_release
@@ -91,15 +91,15 @@ jobs:
           release_name: ${{ github.ref }}
           draft: true
           prerelease: false
-      
+
       - name: upload linux artifact
         uses: actions/upload-release-asset@v1.0.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./bpass-${{ gsteps.tag_parse.outputs.tag }}-linux-x86_64.tar.gz
-          asset_name: bpass-${{ gsteps.tag_parse.outputs.tag }}-linux-x86_64.tar.gz 
+          asset_path: ./bpass-${{ steps.tag_parse.outputs.tag }}-linux-x86_64.tar.gz
+          asset_name: bpass-${{ steps.tag_parse.outputs.tag }}-linux-x86_64.tar.gz
           asset_content_type: application/gzip
 
       - name: upload darwin artifact
@@ -108,8 +108,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./bpass-${{ gsteps.tag_parse.outputs.tag }}-darwin-x86_64.tar.gz
-          asset_name: bpass-${{ gsteps.tag_parse.outputs.tag }}-darwin-x86_64.tar.gz 
+          asset_path: ./bpass-${{ steps.tag_parse.outputs.tag }}-darwin-x86_64.tar.gz
+          asset_name: bpass-${{ steps.tag_parse.outputs.tag }}-darwin-x86_64.tar.gz
           asset_content_type: application/gzip
 
       - name: upload windows artifact
@@ -118,6 +118,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./bpass-${{ gsteps.tag_parse.outputs.tag }}-windows-x86_64.zip
-          asset_name: bpass-${{ gsteps.tag_parse.outputs.tag }}-windows-x86_64.zip
+          asset_path: ./bpass-${{ steps.tag_parse.outputs.tag }}-windows-x86_64.zip
+          asset_name: bpass-${{ steps.tag_parse.outputs.tag }}-windows-x86_64.zip
           asset_content_type: application/zip
