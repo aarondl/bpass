@@ -1,0 +1,29 @@
+name: test
+on: push
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: [1.13.3]
+    steps:
+      - name: go
+        uses: actions/setup-go@v1
+        with:
+          go-version: ${{matrix.go}}
+
+      - name: checkout
+        uses: actions/checkout@v1
+        with: { fetch-depth: 1 }
+
+      - name: deps
+        run: go mod download
+        env: { GOPROXY: 'https://proxy.golang.org' }
+
+      - name: test
+        run: go test -v ./...
+
+      - name: build
+        run: go build
