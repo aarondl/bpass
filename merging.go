@@ -89,7 +89,7 @@ func mergeBlobs(u *uiContext, remotes []blobParts) (m mergeResult, err error) {
 				if lastTimeLocal < lastTimeRemote {
 					takeRemoteCreds = true
 				} else if lastTimeLocal == lastTimeRemote {
-					infoColor.Println("remote %q has different credentials!")
+					infoColor.Printf("remote %q has different credentials!\n", r.Name)
 					takeRemoteCreds, err = u.getYesNo("use remote credentials from now on?")
 					if err != nil {
 						return m, err
