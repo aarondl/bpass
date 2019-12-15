@@ -2,6 +2,7 @@ package scpsync
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -13,6 +14,31 @@ import (
 
 	"golang.org/x/crypto/ssh"
 )
+
+func ensureUserRO(filename string) {
+	f, err := os.Stat(filename)
+	if err != nil {
+		panic(err)
+	}
+
+	if f.IsDir() {
+		panic(fmt.Sprintf("%q is a directory", filename))
+	}
+
+	if f.Mode() != 0600 {
+		if err := os.Chmod(filename, 0600); err != nil {
+			panic(fmt.Sprintf("failed to set mode on %q: %v", filename, err))
+		}
+	}
+}
+
+func TestMain(m *testing.M) {
+	// We have to do this because git doesn't care about file permissions enough
+	ensureUserRO("testdata/client.key")
+	ensureUserRO("testdata/host.key")
+
+	os.Exit(m.Run())
+}
 
 func TestSend(t *testing.T) {
 	// No t.Parallel(), sshd will bind to same port
