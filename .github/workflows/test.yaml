@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        go: [1.13.3]
+        go: [1.13.5]
     steps:
       - name: go
         uses: actions/setup-go@v1
