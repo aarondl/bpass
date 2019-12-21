@@ -34,7 +34,7 @@ func parseCli() {
 	defaultFilePath := ".bpass"
 	homeDir, err := os.UserHomeDir()
 	if err == nil && len(homeDir) != 0 {
-		defaultFilePath = filepath.Join(homeDir, flagFile)
+		defaultFilePath = filepath.Join(homeDir, defaultFilePath)
 	}
 	flagFile = defaultFilePath
 
