@@ -8,7 +8,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/chzyer/readline"
+	"github.com/aarondl/readline"
 )
 
 type completer func(string) []string
