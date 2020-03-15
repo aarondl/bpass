@@ -45,6 +45,7 @@ Clipboard copy shortcuts (alias of cp <query> <key>):
  user  <query>       - Copy username to clipboard
  email <query>       - Copy email to clipboard
  totp  <query>       - Copy twofactor to clipboard
+ login <query>       - Copy username, email, password and totp one after another
 
 Other help topics (use help <topic>):
  sync, users, other
@@ -328,6 +329,22 @@ var replCmds = map[string]replCmd{
 	blobformat.KeyPass:      {ReadOnly: true, Run: quickCopy},
 	blobformat.KeyEmail:     {ReadOnly: true, Run: quickCopy},
 	blobformat.KeyTwoFactor: {ReadOnly: true, Run: quickCopy},
+
+	"login": {
+		Run: func(r *repl, cmd string, args []string) error {
+			name := r.ctxEntry
+			if len(args) >= 1 {
+				name = args[0]
+			}
+
+			if len(name) == 0 {
+				errColor.Println("syntax: login <query>")
+				return nil
+			}
+
+			return r.ctx.login(name)
+		},
+	},
 
 	"set": {
 		Run: func(r *repl, cmd string, args []string) error {

@@ -682,7 +682,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		}
 
 		if copy {
-			copyToClipboard(val)
+			copyToClipboard(blobformat.KeyTwoFactor, val)
 		} else {
 			fmt.Println(val)
 		}
@@ -693,7 +693,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		}
 		val := value.Format(time.RFC3339)
 		if copy {
-			copyToClipboard(val)
+			copyToClipboard(blobformat.KeyUpdated, val)
 		} else {
 			fmt.Println(val)
 		}
@@ -704,9 +704,63 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		}
 
 		if copy {
-			copyToClipboard(value)
+			copyToClipboard(key, value)
 		} else {
 			fmt.Println(value)
+		}
+	}
+
+	return nil
+}
+
+func (u *uiContext) login(search string) error {
+	uuid, err := u.findOne(search)
+	if err != nil {
+		return err
+	}
+	if len(uuid) == 0 {
+		return nil
+	}
+
+	blob, err := u.store.Find(uuid)
+	if err != nil {
+		return err
+	}
+
+	type keyVal struct {
+		Key string
+		Val string
+	}
+
+	keys := []string{
+		blobformat.KeyUser,
+		blobformat.KeyEmail,
+		blobformat.KeyPass,
+		blobformat.KeyTwoFactor,
+	}
+
+	var keyVals []keyVal
+
+	for _, k := range keys {
+		value, ok := blob[k]
+		if ok {
+			if k == blobformat.KeyTwoFactor {
+				value, err = blob.TwoFactor()
+				if err != nil {
+					return err
+				}
+			}
+			keyVals = append(keyVals, keyVal{Key: k, Val: value})
+		}
+	}
+
+	for i, kv := range keyVals {
+		copyToClipboard(kv.Key, kv.Val)
+		if i < len(keyVals)-1 {
+			_, err = u.prompt(infoColor.Sprint("press enter for next"))
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1192,12 +1246,14 @@ func validateLabel(labels []string, label string) bool {
 	return true
 }
 
-func copyToClipboard(txt string) {
+func copyToClipboard(kind string, txt string) {
 	err := clipboard.WriteAll(txt)
 	if err != nil {
-		errColor.Println("Failed to copy text to clipboard")
+		errColor.Printf("Failed to copy %s to clipboard", kind)
 		return
 	}
 
-	infoColor.Println("Copied value to clipboard")
+	infoColor.Print("Copied ")
+	keyColor.Print(kind)
+	infoColor.Println(" to clipboard")
 }
