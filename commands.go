@@ -776,21 +776,17 @@ func (u *uiContext) set(search, key, value string) error {
 		return nil
 	}
 
-	if key == blobformat.KeyPass && len(value) == 0 {
-		value, err = u.getPassword()
-		if err != nil {
-			return err
-		}
-
-		return nil
-	} else if len(value) == 0 {
-		value, err = u.promptMultiline(promptColor.Sprint("> "))
-		if err != nil {
-			return err
-		}
-	}
-
 	switch key {
+	case blobformat.KeyPass:
+		if len(value) == 0 {
+			// if pass was not provided, generate one
+			value, err = u.getPassword()
+			if err != nil {
+				return err
+			}
+		}
+
+		u.store.Set(uuid, key, value)
 	case blobformat.KeyTwoFactor:
 		if err := u.store.SetTwofactor(uuid, value); err != nil {
 			errColor.Println(err)
@@ -808,6 +804,16 @@ func (u *uiContext) set(search, key, value string) error {
 
 		u.store.Set(uuid, key, value)
 	default:
+		// no known key was provided,  setting custom key
+
+		if len(value) == 0 {
+			// prompting user to enter value since no value was provided
+			value, err = u.promptMultiline(promptColor.Sprint("> "))
+			if err != nil {
+				return err
+			}
+		}
+
 		u.store.Set(uuid, key, value)
 	}
 
