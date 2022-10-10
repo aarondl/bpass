@@ -233,15 +233,16 @@ func (u *uiContext) getPassword() (string, error) {
 		infoColor.Println("Enter a number to adjust length, a letter to toggle/use a feature\nor a letter followed by a number to ensure at least n of that type")
 		infoColor.Printf("  length: %-3d [u]pper: %-3s [l]ower: %-3s\n", length, showSetting(upper), showSetting(lower))
 		infoColor.Printf("[n]umber: %-3s [b]asic: %-3s [e]xtra: %-3s\n", showSetting(number), showSetting(basic), showSetting(extra))
-		infoColor.Println("[y] accept password, [m] manual password entry, [enter] to regen password, [?] help")
+		infoColor.Println("[y] accept password, [c] copy to clipboard [m] manual password entry, [enter] to regen password, [?] help")
 		fmt.Println()
 	}
 	help()
 
 	var err error
 	var choice, password string
+	regen := true
 	for {
-		if choice != "?" {
+		if regen {
 			password, err = genPassword(length, upper, lower, number, basic, extra)
 			if err == errPasswordImpossible {
 				errColor.Println("Could not generate password with these requirements")
@@ -254,16 +255,17 @@ func (u *uiContext) getPassword() (string, error) {
 			fmt.Fprintln(u.out, promptColor.Sprint("password:"), passColor.Sprint(password))
 		}
 
-		choice, err = u.prompt(promptColor.Sprint("u/l/n/b/e/y/m/enter/?> "))
+		choice, err = u.prompt(promptColor.Sprint("u/l/n/b/e/y/c/m/enter/?> "))
 		if err != nil {
 			return "", err
 		}
+		regen = true
 
 		splits := strings.Fields(choice)
 
 		switch {
 		case choice == "":
-			// Regen
+			// Just regen
 		case choice == "y":
 			return password, nil
 		case choice == "m":
@@ -284,6 +286,10 @@ func (u *uiContext) getPassword() (string, error) {
 			return initial, err
 		case choice == "?":
 			help()
+			regen = false
+		case splits[0] == "c":
+			copyToClipboard("password", password)
+			regen = false
 		case splits[0] == "u":
 			setSetting("uppercase", splits, &upper)
 		case splits[0] == "l":

@@ -679,6 +679,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 
 		if len(val) == 0 {
 			errColor.Println("totp is not set for", blob.Name())
+			return nil
 		}
 
 		if copy {
@@ -691,6 +692,12 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		if err != nil {
 			return err
 		}
+
+		if value.IsZero() {
+			errColor.Println("updated is not set for", blob.Name())
+			return nil
+		}
+
 		val := value.Format(time.RFC3339)
 		if copy {
 			copyToClipboard(blobformat.KeyUpdated, val)
@@ -701,6 +708,7 @@ func (u *uiContext) get(search, key string, index int, copy bool) error {
 		value, ok := blob[key]
 		if !ok {
 			errColor.Printf("%s.%s is not set", blob.Name(), key)
+			return nil
 		}
 
 		if copy {
