@@ -391,6 +391,7 @@ func sshConfig(entry txlogs.Entry) (address, path string, config *ssh.ClientConf
 
 	address = net.JoinHostPort(host, port)
 	config = new(ssh.ClientConfig)
+	config.HostKeyAlgorithms = []string{ssh.KeyAlgoED25519, ssh.KeyAlgoRSA}
 	config.User = user
 	if len(pass) != 0 {
 		config.Auth = append(config.Auth, ssh.Password(pass))
