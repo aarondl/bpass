@@ -23,7 +23,7 @@ var (
 type keyNotAllowed string
 
 func (k keyNotAllowed) Error() string {
-	return fmt.Sprintf("%q may not be set", k)
+	return fmt.Sprintf("%q may not be set", string(k))
 }
 
 // IsKeyNotAllowed checks if the error is a key error (some keys cannot

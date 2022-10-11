@@ -84,6 +84,11 @@ func main() {
 			fmt.Printf("error occurred: %+v\nexiting without saving", err)
 			goto Exit
 		}
+	case exportCmd.Used:
+		if err = export(ctx); err != nil {
+			fmt.Printf("error occurred: %+v\nexiting without saving", err)
+			goto Exit
+		}
 	default:
 		if !ctx.readOnly && !flagNoAutoSync {
 			if err = ctx.sync("", true, true); err != nil {

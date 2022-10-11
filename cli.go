@@ -22,12 +22,16 @@ var (
 	flagNoAutoSync  bool
 	flagTime        string
 	flagFile        string
+
+	flagExportFormat   string
+	flagExportFilename string
 )
 
 var (
 	versionCmd     = flaggy.NewSubcommand("version")
 	genCmd         = flaggy.NewSubcommand("gen")
 	lpassImportCmd = flaggy.NewSubcommand("lpassimport")
+	exportCmd      = flaggy.NewSubcommand("export")
 )
 
 func parseCli() {
@@ -49,6 +53,11 @@ func parseCli() {
 	versionCmd.Description = "print version and exit"
 	lpassImportCmd.Description = "import lastpass csv by running `lpass export`"
 	genCmd.Description = "generate a password"
+	exportCmd.Description = "export the database"
+
+	flagExportFormat = "CSV"
+	exportCmd.String(&flagExportFormat, "", "format", "The format to output")
+	exportCmd.AddPositionalValue(&flagExportFilename, "output", 1, true, "Export filename")
 
 	parser.AdditionalHelpAppend = "bpass respects $BPASS, $EDITOR, $PINENTRY env vars\n$PINENTRY can be set to none to prevent it from using pinentry"
 
@@ -65,6 +74,7 @@ func parseCli() {
 	parser.AttachSubcommand(versionCmd, 1)
 	parser.AttachSubcommand(genCmd, 1)
 	parser.AttachSubcommand(lpassImportCmd, 1)
+	parser.AttachSubcommand(exportCmd, 1)
 	parser.Parse()
 
 	if flagFile == defaultFilePath {
